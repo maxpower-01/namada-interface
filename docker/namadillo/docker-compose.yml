@@ -1,0 +1,21 @@
+services:
+  namadillo:
+    image: namada-interface/namadillo
+    build:
+      context: ../..
+      dockerfile: docker/namadillo/Dockerfile
+    ports:
+      - "3000:80"
+    environment:
+      INDEXER_URL: ""
+      RPC_URL: ""
+      MASP_INDEXER_URL: ""
+      LOCALNET_ENABLED: false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: curl --fail http://localhost:80 || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
