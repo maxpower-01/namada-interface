@@ -1,95 +1,125 @@
-# Namadillo
+# 🟡 Namadillo
 
-This is the React app for `namadillo`, the web client which integrates with the Namada `extension`.
+## About
 
-## Table of Contents
+**Namadillo** is a Web App built using [React](https://react.dev), designed to work hand-in-hand with the [Namada Browser Extension](https://github.com/anoma/namada-interface/tree/main/apps/extension).
 
-- [Introduction](#introduction)
-- [How to Contribute](#how-to-contribute)
-- [Usage](#usage)
-- [Configuration](#configuration)
-- [Hosting Namadillo](#hosting-namadillo)
+It provides a user-friendly interface for interacting with the [Namada](https://github.com/anoma/namada) network, with development progressing in step with the phases outlined in the [Namada Roadmap](https://namada.net/mainnet-launch).
 
-### Introduction
+## Contribution
 
-Namadillo is a high-level user interface to interact with the Namada Blockchain. The current development aims to follow the phases defined in the [Namada roadmap](https://namada.net/mainnet-launch).
+**Contributions are always welcome!** If you're interested in getting involved, please start by reading through our [CONTRIBUTING](https://github.com/anoma/namada-interface/blob/main/CONTRIBUTING.md) file. 
 
-### How to Contribute
+# 🚀 Usage
 
-If you would like to contribute, please read [CONTRIBUTING.md](../../CONTRIBUTING.md) first.
+If you'd like to host Namadillo, there are multiple setup options available. This guide will walk you through the steps to set up and run the project. You can choose to run Namadillo either with Docker or without it, depending on your preference and environment.
+
+## Configuration
+
+When the user accesses Namadillo, the interface prompts them to enter valid Namada URLs for the RPC, [Indexer](https://github.com/anoma/namada-indexer), and [MASP Indexer](https://github.com/anoma/namada-masp-indexer) services. You can preconfigure these values to simplify the process for the user. 
+
+**For publicly available infrastructure services, refer to the  [Namada Ecosystem Repository](https://github.com/Luminara-Hub/namada-ecosystem/tree/main/user-and-dev-tools/mainnet). Verify the configured URLs are valid and publicly accessible to ensure proper functionality. Invalid URLs, such as local IP addresses or those requiring VPN access, may prevent Namadillo from working correctly.**
+
+Preconfiguration can be set up based on how you choose to run Namadillo by editing the appropriate configuration file outlined in the table.
+
+| Docker | Self-Hosted |
+|-|-|
+| `apps/namadillo/docker/docker-compose.yml` | `apps/namadillo/public/config.toml` |
+
+**Example:**
+```
+indexer_url = "https://<namada-indexer>:5001"
+rpc_url = "https://<rpc>:26657"
+masp_indexer_url = "https://<namada-masp-indexer>:5000"
+localnet_enabled = false
+```
+
+Your selected RPC service should include the following ngnix configuration. Without this setup, the interface may fail to sync properly.
+
+```
+add_header Access-Control-Allow-Origin *;
+add_header Access-Control-Max-Age 3600;
+add_header Access-Control-Expose-Headers Content-Length;
+```
+
+## 🐳 Docker Deployment 
+
+### Prerequisites
+
+Before starting, ensure you have the necessary tools and dependencies installed. Below are the steps to set up the required environment.
+
+- **Packages**: Install prerequisite packages from the APT repository.
+
+```sh
+apt-get install -y curl apt-transport-https ca-certificates software-properties-common git nano build-essential
+```
+
+- **Docker**: Follow the official instructions provided by Docker to install it: [Install Docker Engine](https://docs.docker.com/engine/install/).
 
 ### Usage
 
-The following commands will help you set up and manage your development environment.
+Ensure you have the latest repository cloned to maintain compatibility with other Namada interfaces. Use the following commands to clone the repository and navigate into its directory.
 
-```bash
-# Install dependencies
+```sh
+# Clone this repository, copy the URL from the Code button above.
+git clone <copied-url>
+cd <repository-name>
+```
+
+Modifiy the `docker/namadillo/docker-compose.yml` with your required enviroment varibvales, described in teh configraution chapter. 
+
+Once the file is updated, build the Docker containers for the project. To build the Docker image, execute the following command from the monorepo root (`namada-interface`).
+
+Modify the `docker/namadillo/docker-compose.yml` file to include your required environment variables, as described in the configuration section.
+
+```sh
+docker compose -f docker/namadillo/docker-compose.yml build
+```
+
+Launch the Namadillo interface containers with the appropriate naming convention for the Namada ecosystem.
+
+```sh
+# Start the Docker containers in the foreground, displaying logs and keeping the terminal active until stopped.
+docker compose -p namada-interface -f docker/namadillo/docker-compose.yml up
+
+# Start the Docker containers in detached mode, running them in the background without displaying logs.
+docker compose -p namada-interface -f docker/namadillo/docker-compose.yml up -d
+```
+
+Namadillo is a single-page application, so all paths must be redirected to the `index.html` file. For [ngnix](https://nginx.org/en/) users, refer to the example configuration `docker/namadillo/docker-compose.yml` for proper setup.
+
+
+## 🖥️ Self-Hosted Deployment
+
+Use the following commands to set up your environment.
+
+```sh
+# Install project dependencies
 yarn
 
-# Build wasm-dependencies (for using SDK Query)
+# Build WebAssembly dependencies (for using SDK Query)
 yarn wasm:build
 
-# Build wasm-dependencies with debugging enabled
+# Build WebAssembly dependencies with debugging enabled
 yarn wasm:build:dev
 
-# Start app in development mode
+# Start the application in development mode
 yarn dev
 
-# If you are running chains locally, it is recommended that you instead proxy RPC requests:
+# Proxy RPC requests if running chains locally
 yarn dev:proxy
 
-# Build production release:
+# Build a production-ready release
 yarn build
 
-# Run ESLint
+# Run ESLint to check for code issues
 yarn lint
 
-# Run ESLint fix
+# Automatically fix ESLint issues
 yarn lint:fix
 
-# Run tests
+# Execute test suites
 yarn test
 ```
 
-### Configuration
-
-By running Namadillo, the interface will prompt you to enter a valid indexer URL. After you provide it, the RPC URL will be fetched from the indexer.
-
-**Note**: If the indexer provides an incorrect RPC URL, such as a local IP address or a URL accessible only via VPN, Namadillo might not work correctly. Therefore, when configuring Namadillo with a new indexer URL, please check the settings to ensure the provided RPC URL is valid.
-
-Alternatively, you can configure the application by modifying the `config.toml` file located in the public folder. Use the [template provided](./public/config.toml) as a base, and specify the values you wish to override.
-
-Example:
-
-```toml
-indexer_url = "http://localhost:5000"
-rpc_url = "http://localhost:27657"
-masp_indexer_url = "http://localhost:5001"
-```
-
-For more details on setting up your local environment for integration between the interface and the extension, see the [README.md](../../README.md) at the root of this repo.
-
-### Hosting Namadillo
-
-If you're interested in hosting Namadillo, a few options are available
-
-#### Docker
-
-In order to build the Docker image, you can run the following command in the **monorepo root**.
-`docker build . -f docker/namadillo/Dockerfile -t namadillo`
-
-**Note:** It might take some time to build all the necessary wasm files.
-
-It's possible to run the Docker container using the following command:
-
-`docker run -p 80:80 namadillo`
-
-In order to change your `config.toml`, please copy the file `/docker/.namadillo.config.toml` to `/docker/namadillo.config.toml` and change the parameters accordingly, before building the image.
-
-#### Self Hosting
-
-If you already have a server set up, you can download a Namadillo version distribution from the [packages](https://github.com/orgs/anoma/packages?repo_name=namada-interface) section of this repository, and place its contents in the desired path in your server.
-
-**Note**: Since Namadillo is a single-page application, it is important to redirect any paths to the `index.html` file. If you're using NGINX, you can refer to this [../../docker/namadillo-nginx.conf](example).
-
-You can edit the `config.toml` file located in the root of the released package to change default RPC and Indexer URLs.
+You can edit RPC, Indexer and MASP Indexer URLs, with the `apps/namadillo/public/config.toml` as a base, and specify the values you wish to override.
