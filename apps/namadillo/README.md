@@ -10,7 +10,7 @@ It provides a user-friendly interface for interacting with the [Namada](https://
 
 **Contributions are always welcome!** If you're interested in getting involved, please start by reading through our [CONTRIBUTING](https://github.com/anoma/namada-interface/blob/main/CONTRIBUTING.md) file. 
 
-# 🚀 Usage
+# 🚀 Getting Started
 
 If you'd like to host Namadillo, there are multiple setup options available. This guide will walk you through the steps to set up and run the project. You can choose to run Namadillo either with Docker or without it, depending on your preference and environment.
 
