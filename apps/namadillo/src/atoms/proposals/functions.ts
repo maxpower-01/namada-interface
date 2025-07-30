@@ -274,10 +274,12 @@ const fromIndexerStatus = (
       return "pending";
     case IndexerProposalStatusEnum.Voting:
       return "ongoing";
-    case IndexerProposalStatusEnum.Passed:
-      return "passed";
+    case IndexerProposalStatusEnum.ExecutedRejected:
     case IndexerProposalStatusEnum.Rejected:
-      return "rejected";
+      return "executedRejected";
+    case IndexerProposalStatusEnum.Passed:
+    case IndexerProposalStatusEnum.ExecutedPassed:
+      return "executedPassed";
     default:
       return assertNever(indexerProposalStatus);
   }
@@ -291,10 +293,10 @@ const toIndexerStatus = (
       return ApiIndexerProposalStatusEnum.Pending;
     case "ongoing":
       return ApiIndexerProposalStatusEnum.VotingPeriod;
-    case "passed":
-      return ApiIndexerProposalStatusEnum.Passed;
-    case "rejected":
-      return ApiIndexerProposalStatusEnum.Rejected;
+    case "executedRejected":
+      return ApiIndexerProposalStatusEnum.ExecutedRejected;
+    case "executedPassed":
+      return ApiIndexerProposalStatusEnum.ExecutedPassed;
     default:
       return assertNever(proposalStatus);
   }

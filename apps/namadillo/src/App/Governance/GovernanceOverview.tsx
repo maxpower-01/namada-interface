@@ -1,4 +1,5 @@
 import { Panel, SkeletonLoading } from "@namada/components";
+import { NavigationFooter } from "App/AccountOverview/NavigationFooter";
 import { ConnectBanner } from "App/Common/ConnectBanner";
 import { PageWithSidebar } from "App/Common/PageWithSidebar";
 import { Sidebar } from "App/Layout/Sidebar";
@@ -66,9 +67,10 @@ export const GovernanceOverview: React.FC = () => {
           <UpcomingProposals proposals={upcomingProposals} />
         </ProposalListPanel>
         <ProposalListPanel
+          className="flex-1"
           title="All Proposals"
           errorText="Unable to load the list of proposals"
-          atoms={activeAtoms}
+          atoms={[]}
         >
           <AllProposalsTable
             votedProposalIds={(votedProposals.data || []).map(
@@ -76,6 +78,7 @@ export const GovernanceOverview: React.FC = () => {
             )}
           />
         </ProposalListPanel>
+        <NavigationFooter className="flex-none h-16" />
       </div>
       <Sidebar>
         <Panel>

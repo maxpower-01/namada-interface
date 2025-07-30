@@ -10,6 +10,7 @@ type ModalContainerProps = {
   children: React.ReactNode;
   containerProps?: HTMLMotionProps<"div">;
   contentProps?: React.ComponentPropsWithoutRef<"div">;
+  headerProps?: React.ComponentPropsWithoutRef<"header">;
 };
 
 export const ModalContainer = ({
@@ -18,6 +19,7 @@ export const ModalContainer = ({
   children,
   contentProps = {},
   containerProps = {},
+  headerProps = {},
 }: ModalContainerProps): JSX.Element => {
   const { className: containerClassName, ...otherProps } = containerProps;
   const { className: contentClassName, ...otherContentProps } = contentProps;
@@ -39,11 +41,14 @@ export const ModalContainer = ({
       >
         <IoClose />
       </i>
-      <header className="flex w-full justify-center items-center relative mb-3 text-lg text-medium">
+      <header
+        className="flex w-full justify-center items-center relative mb-0 text-lg text-medium"
+        {...headerProps}
+      >
         {header}
       </header>
       <div
-        className={twMerge("flex-1 overflow-hidden py-6", contentClassName)}
+        className={twMerge("flex-1 overflow-hidden pt-4", contentClassName)}
         {...otherContentProps}
       >
         {children}

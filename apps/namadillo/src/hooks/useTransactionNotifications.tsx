@@ -1,5 +1,5 @@
 import { Stack } from "@namada/components";
-import { RedelegateMsgValue, TxProps } from "@namada/types";
+import { ClaimRewardsProps, RedelegateMsgValue, TxProps } from "@namada/types";
 import { mapUndefined, shortenAddress } from "@namada/utils";
 import { NamCurrency } from "App/Common/NamCurrency";
 import { TokenCurrency } from "App/Common/TokenCurrency";
@@ -27,9 +27,30 @@ const parseTxsData = <T extends TxWithAmount>(
   tx: TxProps | TxProps[],
   data: T[]
 ): { id: string; total: BigNumber } => {
-  const id = createNotificationId(tx);
+  const id = createNotificationId(
+    Array.isArray(tx) ? tx.map((t) => t.hash) : [tx.hash]
+  );
   const total = getTotalAmountFromTransactionList(data);
   return { total, id };
+};
+
+const getClaimingFailedDetails = (
+  data: { error?: string; value: ClaimRewardsProps }[]
+): React.ReactNode => {
+  const withErrors = data.filter((d) => typeof d.error === "string");
+  return (
+    <Stack>
+      <Stack as="ul" gap={1}>
+        {withErrors.map((d, idx) => {
+          return (
+            <li className="flex justify-between" key={idx}>
+              <b>{d.error}</b>
+            </li>
+          );
+        })}
+      </Stack>
+    </Stack>
+  );
 };
 
 const getAmountByValidatorList = <T extends AmountByValidator>(
@@ -49,6 +70,25 @@ const getAmountByValidatorList = <T extends AmountByValidator>(
   );
 };
 
+const getAmountByValidatorListWithErr = <T extends AmountByValidator>(
+  data: { value: T; error?: string }[]
+): React.ReactNode => {
+  return (
+    <Stack gap={2}>
+      {getAmountByValidatorList(data.map((d) => d.value))}
+      <Stack as="ul" gap={1}>
+        {data.map((d) => {
+          return (
+            <li className="flex justify-between" key={d.value.validator}>
+              <b>{d.error}</b>
+            </li>
+          );
+        })}
+      </Stack>
+    </Stack>
+  );
+};
+
 const getReDelegateDetailList = (
   data: RedelegateMsgValue[]
 ): React.ReactNode => {
@@ -64,6 +104,25 @@ const getReDelegateDetailList = (
           {shortenAddress(entry.destinationValidator, 6, 8)}
         </li>
       ))}
+    </Stack>
+  );
+};
+
+const getReDelegateDetailListWithErr = (
+  data: { value: RedelegateMsgValue; error?: string }[]
+): React.ReactNode => {
+  return (
+    <Stack gap={2}>
+      {getReDelegateDetailList(data.map((d) => d.value))}
+      <Stack as="ul" gap={1}>
+        {data.map((d) => {
+          return (
+            <li className="flex justify-between" key={d.value.sourceValidator}>
+              <b>{d.error}</b>
+            </li>
+          );
+        })}
+      </Stack>
     </Stack>
   );
 };
@@ -110,7 +169,7 @@ export const useTransactionNotifications = (): void => {
       ),
       details:
         e.detail.failedData ?
-          failureDetails(getAmountByValidatorList(e.detail.failedData))
+          failureDetails(getAmountByValidatorListWithErr(e.detail.failedData))
         : e.detail.error?.message,
     });
   });
@@ -147,7 +206,7 @@ export const useTransactionNotifications = (): void => {
         failedDescription: (
           <>The following staking transactions were not applied:</>
         ),
-        failedDetails: getAmountByValidatorList(e.detail.failedData!),
+        failedDetails: getAmountByValidatorListWithErr(e.detail.failedData!),
       }),
       type: "partialSuccess",
     });
@@ -183,7 +242,7 @@ export const useTransactionNotifications = (): void => {
         failedDescription: (
           <>The following unstaking transactions were not applied:</>
         ),
-        failedDetails: getAmountByValidatorList(e.detail.failedData!),
+        failedDetails: getAmountByValidatorListWithErr(e.detail.failedData!),
       }),
       type: "partialSuccess",
     });
@@ -202,13 +261,13 @@ export const useTransactionNotifications = (): void => {
       ),
       details:
         e.detail.failedData ?
-          failureDetails(getAmountByValidatorList(e.detail.failedData))
+          failureDetails(getAmountByValidatorListWithErr(e.detail.failedData!))
         : e.detail.error?.message,
     });
   });
 
   useTransactionEventListener("Withdraw.Success", (e) => {
-    const id = createNotificationId(e.detail.tx);
+    const id = createNotificationId(e.detail.tx.map((t) => t.hash));
     dispatchNotification({
       id,
       title: "Withdrawal Success",
@@ -218,7 +277,7 @@ export const useTransactionNotifications = (): void => {
   });
 
   useTransactionEventListener("Withdraw.Error", (e) => {
-    const id = createNotificationId(e.detail.tx);
+    const id = createNotificationId(e.detail.tx.map((t) => t.hash));
     dispatchNotification({
       id,
       title: "Withdrawal Error",
@@ -241,7 +300,9 @@ export const useTransactionNotifications = (): void => {
       ),
       details:
         e.detail.failedData ?
-          failureDetails(getReDelegateDetailList(e.detail.failedData))
+          failureDetails(
+            getReDelegateDetailList(e.detail.failedData.map((fd) => fd.value))
+          )
         : e.detail.error?.message,
       type: "error",
     });
@@ -277,14 +338,14 @@ export const useTransactionNotifications = (): void => {
       details: partialSuccessDetails({
         details: getReDelegateDetailList(e.detail.successData!),
         failedDescription: <>The following redelegations were not applied:</>,
-        failedDetails: getReDelegateDetailList(e.detail.failedData!),
+        failedDetails: getReDelegateDetailListWithErr(e.detail.failedData!),
       }),
       type: "partialSuccess",
     });
   });
 
   useTransactionEventListener("ClaimRewards.Success", (e) => {
-    const id = createNotificationId(e.detail.tx);
+    const id = createNotificationId(e.detail.tx.map((t) => t.hash));
     dispatchNotification({
       id,
       title: "Claim Rewards",
@@ -293,8 +354,32 @@ export const useTransactionNotifications = (): void => {
     });
   });
 
+  useTransactionEventListener("ClaimRewards.PartialSuccess", (e) => {
+    const { tx } = e.detail;
+    const id = createNotificationId(tx.map((t) => t.hash));
+    const successes = e.detail.successData?.length || 0;
+    const failures = e.detail.failedData?.length || 0;
+    dispatchNotification({
+      id,
+      title: <>Some claim rewards transactions were not successful</>,
+      description: (
+        <>
+          Successful transactions: {successes}
+          <br />
+          Unsuccessful transactions: {failures}
+        </>
+      ),
+      details: partialSuccessDetails({
+        details: <>Inner transaction failed</>,
+        failedDescription: <></>,
+        failedDetails: getClaimingFailedDetails(e.detail.failedData!),
+      }),
+      type: "partialSuccess",
+    });
+  });
+
   useTransactionEventListener("ClaimRewards.Error", (e) => {
-    const id = createNotificationId(e.detail.tx);
+    const id = createNotificationId(e.detail.tx.map((t) => t.hash));
     dispatchNotification({
       id,
       title: "Claim Rewards",
@@ -305,7 +390,7 @@ export const useTransactionNotifications = (): void => {
   });
 
   useTransactionEventListener("VoteProposal.Error", (e) => {
-    const id = createNotificationId(e.detail.tx);
+    const id = createNotificationId(e.detail.tx.map((t) => t.hash));
     dispatchNotification({
       id,
       type: "error",
@@ -316,7 +401,7 @@ export const useTransactionNotifications = (): void => {
   });
 
   useTransactionEventListener("VoteProposal.Success", (e) => {
-    const id = createNotificationId(e.detail.tx);
+    const id = createNotificationId(e.detail.tx.map((t) => t.hash));
     dispatchNotification({
       id,
       title: "Governance transaction succeeded",
@@ -329,7 +414,7 @@ export const useTransactionNotifications = (): void => {
     detail: tx,
   }: CustomEvent<TransferTransactionData>): void => {
     if (!tx.hash) return;
-    const id = createNotificationId(tx.hash);
+    const id = createNotificationId([tx.hash]);
     const storedTx = searchAllStoredTxByHash(tx.hash);
     dispatchNotification({
       id,
@@ -358,7 +443,7 @@ export const useTransactionNotifications = (): void => {
     detail: tx,
   }: CustomEvent<TransferTransactionData>): void => {
     if (!tx.hash) return;
-    const id = createNotificationId(tx.hash);
+    const id = createNotificationId([tx.hash]);
     const storedTx = searchAllStoredTxByHash(tx.hash);
     dispatchNotification({
       id,
@@ -383,14 +468,18 @@ export const useTransactionNotifications = (): void => {
   useTransactionEventListener("UnshieldingTransfer.Success", onTransferSuccess);
 
   useTransactionEventListener(
-    ["IbcTransfer.Success", "IbcWithdraw.Success"],
+    [
+      "IbcTransfer.Success",
+      "IbcWithdraw.Success",
+      "ShieldedIbcWithdraw.Success",
+    ],
     ({ detail: tx }) => {
       if (!tx.hash) return;
       invariant(tx.hash, "Notification error: Invalid Tx hash");
 
-      const id = createNotificationId(tx.hash);
+      const id = createNotificationId([tx.hash]);
       const title =
-        tx.type === "TransparentToIbc" ?
+        tx.type === "ShieldedToIbc" || tx.type === "TransparentToIbc" ?
           "IBC withdraw transaction succeeded"
         : "IBC transfer transaction succeeded";
 
@@ -415,9 +504,9 @@ export const useTransactionNotifications = (): void => {
       if (!tx) return;
 
       invariant(tx.hash, "Notification error: Invalid Tx provider");
-      const id = createNotificationId(tx.hash);
+      const id = createNotificationId([tx.hash]);
       const title =
-        tx.type === "TransparentToIbc" ?
+        tx.type === "ShieldedToIbc" || tx.type === "TransparentToIbc" ?
           "IBC withdraw transaction failed"
         : "IBC transfer transaction failed";
 
@@ -429,6 +518,32 @@ export const useTransactionNotifications = (): void => {
             Your transaction of{" "}
             <TokenCurrency amount={tx.displayAmount} symbol={tx.asset.symbol} />{" "}
             has failed.
+          </>
+        ),
+        details: tx.errorMessage,
+        type: "error",
+      });
+    }
+  );
+
+  useTransactionEventListener(
+    ["ShieldedIbcWithdraw.Error"],
+    ({ detail: tx }) => {
+      if (!tx) return;
+
+      invariant(tx.hash, "Notification error: Invalid Tx provider");
+      const id = createNotificationId([tx.hash]);
+      const title = "IBC withdraw transaction failed";
+
+      dispatchNotification({
+        id,
+        title,
+        description: (
+          <>
+            Your transaction of{" "}
+            <TokenCurrency amount={tx.displayAmount} symbol={tx.asset.symbol} />{" "}
+            has failed.{" "}
+            <b>Open the Namada extension to access the refund account.</b>
           </>
         ),
         details: tx.errorMessage,

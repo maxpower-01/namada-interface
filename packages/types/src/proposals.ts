@@ -3,8 +3,8 @@ import BigNumber from "bignumber.js";
 export const proposalStatuses = [
   "pending",
   "ongoing",
-  "passed",
-  "rejected",
+  "executedRejected",
+  "executedPassed",
 ] as const;
 
 export type ProposalStatus = (typeof proposalStatuses)[number];

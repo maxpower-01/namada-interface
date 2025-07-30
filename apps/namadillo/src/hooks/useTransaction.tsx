@@ -15,7 +15,7 @@ import {
   TransactionPair,
 } from "lib/query";
 import { BuildTxAtomParams, ToastNotification } from "types";
-import { TransactionEventsClasses } from "types/events";
+import { TransactionEventTypes } from "types/events";
 import { TransactionFeeProps, useTransactionFee } from "./useTransactionFee";
 
 type AtomType<T> = Atom<
@@ -31,11 +31,11 @@ type PartialNotification = Pick<ToastNotification, "title" | "description">;
 
 export type UseTransactionPropsEvents<T> = {
   onSigned?: (tx: TransactionPair<T>) => void;
-  onError?: (err: unknown) => void;
+  onError?: (err: unknown, context?: TransactionPair<T>) => Promise<void>;
   onBeforeCreateDisposableSigner?: () => void;
   onBeforeBuildTx?: () => void;
   onBeforeSign?: (encodedTxData: EncodedTxData<T>) => void;
-  onBeforeBroadcast?: (tx: TransactionPair<T>) => void;
+  onBeforeBroadcast?: (tx: TransactionPair<T>) => Promise<void>;
   onBroadcasted?: (tx: TransactionPair<T>) => void;
 };
 
@@ -43,7 +43,7 @@ export type UseTransactionProps<T> = {
   params: T[];
   createTxAtom: AtomType<T>;
   useDisposableSigner?: boolean;
-  eventType: TransactionEventsClasses;
+  eventType: TransactionEventTypes;
   parsePendingTxNotification?: (tx: TransactionPair<T>) => PartialNotification;
   parseErrorTxNotification?: () => PartialNotification;
 } & UseTransactionPropsEvents<T>;
@@ -60,6 +60,14 @@ export type UseTransactionOutput<T> = {
   Partial<BuildTxAtomParams<T>> | undefined,
   unknown
 >;
+
+const getNotificationId = <T,>(tx: TransactionPair<T>): string => {
+  const notificationId = createNotificationId(
+    tx.encodedTxData.txs.map((tx) => tx.hash)
+  );
+
+  return notificationId;
+};
 
 export const useTransaction = <T,>({
   params,
@@ -80,17 +88,32 @@ export const useTransaction = <T,>({
   const dispatchNotification = useSetAtom(dispatchToastNotificationAtom);
   const { mutateAsync: performBuildTx } = useAtomValue(createTxAtom);
 
-  // We don't want to display zeroed value when params are not set yet.
-  const txKinds = new Array(Math.max(1, params.length)).fill(eventType);
-  const feeProps = useTransactionFee(txKinds);
+  // Claim & Stake is the only array of tx kinds. The rest are single tx kinds.
+  const arr = new Array(Math.max(1, params.length));
+  const kinds =
+    Array.isArray(eventType) ?
+      // **IMPORTANT**
+      // If eventType is an array, we set kinds by multiplying each kind by params length
+      // i.e. (["ClaimRewards", "Bond"] AND params.length == 2) => ["ClaimRewards", "Bond", "ClaimRewards", "Bond"]
+      arr.fill(eventType).flat()
+    : arr.fill(eventType); // Don't display zeroed value when params are not set yet.
+
+  const feeProps = useTransactionFee(
+    kinds,
+    kinds.some((k) => ["ShieldedTransfer", "UnshieldingTransfer"].includes(k))
+  );
+  const broadcastEventType =
+    !Array.isArray(eventType) ? eventType : "ClaimRewards";
 
   const dispatchPendingTxNotification = (
     tx: TransactionPair<T>,
     notification: PartialNotification
   ): void => {
+    const notificationId = getNotificationId(tx);
+
     dispatchNotification({
       ...notification,
-      id: createNotificationId(tx.encodedTxData.txs),
+      id: notificationId,
       type: "pending",
     });
   };
@@ -101,13 +124,27 @@ export const useTransaction = <T,>({
     notification: PartialNotification,
     tx: TransactionPair<T>
   ): void => {
+    const notificationId = getNotificationId(tx);
     dispatchNotification({
       ...notification,
-      id: createNotificationId(tx.encodedTxData.txs),
+      id: notificationId,
       details: error instanceof Error ? error.message : undefined,
       type: "error",
     });
   };
+
+  class TransactionError<T> extends Error {
+    public cause: { originalError: unknown; context: TransactionPair<T> };
+    constructor(
+      public message: string,
+      options: {
+        cause: { originalError: unknown; context: TransactionPair<T> };
+      }
+    ) {
+      super(message);
+      this.cause = options.cause;
+    }
+  }
 
   const transactionQuery = useMutation({
     mutationFn: async (
@@ -126,12 +163,13 @@ export const useTransaction = <T,>({
         }
 
         onBeforeBuildTx?.();
-        const encodedTxData = await performBuildTx({
+        const variables = {
           params,
           gasConfig: feeProps.gasConfig,
           account,
           ...txAdditionalParams,
-        });
+        };
+        const encodedTxData = await performBuildTx(variables);
 
         invariant(encodedTxData, "Error: invalid TX created by buildTx");
         useDisposableSigner &&
@@ -161,14 +199,15 @@ export const useTransaction = <T,>({
           );
         }
 
-        onBeforeBroadcast?.(transactionPair);
+        await onBeforeBroadcast?.(transactionPair);
         try {
           await broadcastTxWithEvents(
             transactionPair.encodedTxData,
             transactionPair.signedTxs,
             transactionPair.encodedTxData.meta?.props,
-            eventType
+            broadcastEventType
           );
+
           onBroadcasted?.(transactionPair);
         } catch (error) {
           if (parseErrorTxNotification) {
@@ -178,11 +217,20 @@ export const useTransaction = <T,>({
               transactionPair
             );
           }
-          throw error;
+          throw new TransactionError<T>("Transaction error", {
+            cause: {
+              originalError: error,
+              context: transactionPair,
+            },
+          });
         }
         return transactionPair;
       } catch (error) {
-        onError?.(error);
+        if (error instanceof TransactionError) {
+          onError?.(error.cause.originalError, error.cause.context);
+        } else {
+          onError?.(error);
+        }
         throw error;
       }
     },

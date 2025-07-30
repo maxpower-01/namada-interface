@@ -1,9 +1,10 @@
-import { Asset, Chain } from "@chain-registry/types";
+import { Chain } from "@chain-registry/types";
 import { AmountInput } from "@namada/components";
 import { TabSelector } from "App/Common/TabSelector";
+import { MaspSyncIndicator } from "App/Layout/MaspSyncIndicator";
 import BigNumber from "bignumber.js";
 import clsx from "clsx";
-import { WalletProvider } from "types";
+import { Asset, WalletProvider } from "types";
 import { AvailableAmountFooter } from "./AvailableAmountFooter";
 import { ConnectProviderButton } from "./ConnectProviderButton";
 import { SelectedAsset } from "./SelectedAsset";
@@ -18,6 +19,7 @@ export type TransferSourceProps = {
   asset?: Asset;
   isLoadingAssets?: boolean;
   isSubmitting?: boolean;
+  isSyncingMasp?: boolean;
   chain?: Chain;
   openChainSelector?: () => void;
   openAssetSelector?: () => void;
@@ -26,7 +28,7 @@ export type TransferSourceProps = {
   availableAmount?: BigNumber;
   availableAmountMinusFees?: BigNumber;
   onChangeAmount?: (amount: BigNumber | undefined) => void;
-  isShielded?: boolean;
+  isShieldedAddress?: boolean;
   onChangeShielded?: (isShielded: boolean) => void;
 };
 
@@ -54,7 +56,8 @@ export const TransferSource = ({
   availableAmountMinusFees,
   amount,
   onChangeAmount,
-  isShielded,
+  isShieldedAddress,
+  isSyncingMasp,
   onChangeShielded,
   isSubmitting,
 }: TransferSourceProps): JSX.Element => {
@@ -62,18 +65,50 @@ export const TransferSource = ({
     <div className="relative bg-neutral-800 rounded-lg px-4 py-5">
       {/** Intro header - Ex: "IBC To Namada" */}
       {onChangeShielded && chain?.chain_name === "namada" && !isSubmitting && (
-        <nav className="mb-6">
+        <nav className="relative z-10 mb-6">
           <TabSelector
-            active={isShielded ? "shielded" : "transparent"}
+            active={isShieldedAddress ? "shielded" : "transparent"}
             items={[
-              { id: "shielded", text: "Shielded", className: "text-yellow" },
+              {
+                id: "shielded",
+                text: (
+                  <span className="relative flex gap-4 items-center justify-center">
+                    Shielded{" "}
+                    {isSyncingMasp && (
+                      <span className="relative flex items-center">
+                        <MaspSyncIndicator
+                          pulsingRingSize="7px"
+                          ringClassName="!text-yellow/50"
+                          syncingChildren={
+                            <div className="text-white text-xs text-left">
+                              Shielded transfers are disabled until sync is
+                              complete.
+                            </div>
+                          }
+                          syncedChildren={<div>Shielded sync completed</div>}
+                        />
+                      </span>
+                    )}
+                  </span>
+                ),
+                className:
+                  isShieldedAddress ? "text-yellow" : (
+                    clsx("text-yellow/50", {
+                      "hover:text-yellow/80": !isSyncingMasp,
+                    })
+                  ),
+                buttonProps: { disabled: isSyncingMasp },
+              },
               {
                 id: "transparent",
                 text: "Transparent",
-                className: "text-white",
+                className:
+                  !isShieldedAddress ? "text-white" : (
+                    "text-white/50 hover:text-white/80"
+                  ),
               },
             ]}
-            onChange={() => onChangeShielded(!isShielded)}
+            onChange={() => onChangeShielded(!isShieldedAddress)}
           />
         </nav>
       )}

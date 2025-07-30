@@ -1,4 +1,3 @@
-import { Asset } from "@chain-registry/types";
 import {
   AccountType,
   ShieldedTransferMsgValue,
@@ -6,6 +5,7 @@ import {
   TransparentTransferMsgValue,
   UnshieldingTransferMsgValue,
 } from "@namada/types";
+import { routes } from "App/routes";
 import { isShieldedAddress } from "App/Transfer/common";
 import { allDefaultAccountsAtom } from "atoms/accounts";
 import {
@@ -22,8 +22,9 @@ import {
 } from "hooks/useTransaction";
 import { useAtomValue } from "jotai";
 import { TransactionPair } from "lib/query";
-import { useMemo } from "react";
-import { Address, NamadaTransferTxKind } from "types";
+import { useMemo, useState } from "react";
+import { generatePath, useNavigate } from "react-router-dom";
+import { Address, Asset, NamadaTransferTxKind } from "types";
 import { isNamadaAsset, toBaseAmount } from "utils";
 import { useOptimisticTransferUpdate } from "./useOptimisticTransferUpdate";
 
@@ -43,6 +44,9 @@ type useTransferOutput = (
   | UseTransactionOutput<UnshieldingTransferMsgValue>
 ) & {
   txKind: NamadaTransferTxKind;
+  txHash?: string;
+  completedAt: Date | undefined;
+  redirectToTransactionPage: () => void;
 };
 
 export const useTransfer = ({
@@ -60,6 +64,9 @@ export const useTransfer = ({
   );
   const pseudoExtendedKey = shieldedAccount?.pseudoExtendedKey ?? "";
   const optimisticTransferUpdate = useOptimisticTransferUpdate();
+  const [completedAt, setCompletedAt] = useState<Date | undefined>();
+  const [txHash, setTxHash] = useState<string | undefined>();
+  const navigate = useNavigate();
 
   const baseDenomAmount = useMemo(() => {
     if (!displayAmount || !asset) {
@@ -80,16 +87,18 @@ export const useTransfer = ({
     }),
     parseErrorTxNotification: () => ({
       title: "Transfer transaction failed",
-      description: "",
+      description: "Your transfer transaction has failed",
     }),
     ...events,
-    onSuccess: (tx: TransactionPair<unknown>) => {
+    onBroadcasted: (tx: TransactionPair<unknown>) => {
       if (target === shieldedAccount?.address) {
         optimisticTransferUpdate(token, baseDenomAmount);
       }
       if (source === shieldedAccount?.address) {
         optimisticTransferUpdate(token, baseDenomAmount.multipliedBy(-1));
       }
+      setCompletedAt(new Date());
+      setTxHash(tx.encodedTxData.txs[0].hash);
       events.onBroadcasted?.(tx);
     },
   };
@@ -124,7 +133,8 @@ export const useTransfer = ({
     onBeforeBuildTx: () =>
       onUpdateStatus?.("Generating MASP params and building transaction..."),
     onBeforeSign: () => onUpdateStatus?.("Waiting for signature..."),
-    onBeforeBroadcast: () => onUpdateStatus?.("Broadcasting transaction..."),
+    onBeforeBroadcast: async () =>
+      onUpdateStatus?.("Broadcasting transaction..."),
     ...commomProps,
   });
 
@@ -162,5 +172,10 @@ export const useTransfer = ({
   return {
     ...result,
     txKind,
+    completedAt,
+    txHash,
+    redirectToTransactionPage: () => {
+      txHash && navigate(generatePath(routes.transaction, { hash: txHash }));
+    },
   };
 };

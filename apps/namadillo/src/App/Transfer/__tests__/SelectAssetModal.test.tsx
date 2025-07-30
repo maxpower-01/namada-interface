@@ -3,6 +3,13 @@ import { SelectAssetModal } from "App/Transfer/SelectAssetModal";
 import { assetMockList } from "../__mocks__/assets";
 import { walletMock } from "../__mocks__/providers";
 
+jest.mock("hooks/useIsChannelInactive", () => ({
+  useIsChannelInactive: jest.fn(() => ({
+    isInactive: false,
+    trace: "",
+  })),
+}));
+
 describe("SelectAssetModal", () => {
   const onCloseMock = jest.fn();
   const onSelectMock = jest.fn();
@@ -31,8 +38,8 @@ describe("SelectAssetModal", () => {
         walletAddress={mockAddress}
       />
     );
-    expect(screen.getByText("Bitcoin")).toBeInTheDocument();
-    expect(screen.getByText("Ethereum")).toBeInTheDocument();
+    expect(screen.getByText("BTC")).toBeInTheDocument();
+    expect(screen.getByText("ETH")).toBeInTheDocument();
   });
 
   it("should filter assets based on search input", async () => {
@@ -66,8 +73,8 @@ describe("SelectAssetModal", () => {
         walletAddress={mockAddress}
       />
     );
-    fireEvent.click(screen.getByText("Bitcoin"));
-    expect(onSelectMock).toHaveBeenCalledWith(assetMockList[1].originalAddress);
+    fireEvent.click(screen.getByText("BTC"));
+    expect(onSelectMock).toHaveBeenCalledWith(assetMockList[1].address);
     expect(onCloseMock).toHaveBeenCalled();
   });
 });

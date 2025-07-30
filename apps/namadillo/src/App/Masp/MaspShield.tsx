@@ -1,4 +1,3 @@
-import { Chain } from "@chain-registry/types";
 import { Panel } from "@namada/components";
 import { AccountType } from "@namada/types";
 import { NamadaTransferTopHeader } from "App/NamadaTransfer/NamadaTransferTopHeader";
@@ -10,23 +9,22 @@ import {
 import { allDefaultAccountsAtom } from "atoms/accounts";
 import { namadaTransparentAssetsAtom } from "atoms/balance/atoms";
 import { chainParametersAtom } from "atoms/chain/atoms";
+import { namadaChainRegistryAtom } from "atoms/integrations";
 import { ledgerStatusDataAtom } from "atoms/ledger";
 import { rpcUrlAtom } from "atoms/settings";
 import BigNumber from "bignumber.js";
 import { useTransactionActions } from "hooks/useTransactionActions";
 import { useTransfer } from "hooks/useTransfer";
+import { useUrlState } from "hooks/useUrlState";
 import { wallets } from "integrations";
 import invariant from "invariant";
 import { useAtom, useAtomValue } from "jotai";
 import { createTransferDataFromNamada } from "lib/transactions";
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import namadaChain from "registry/namada.json";
-import { Address } from "types";
 
 export const MaspShield: React.FC = () => {
-  const [searchParams, setSearchParams] = useSearchParams();
   const { storeTransaction } = useTransactionActions();
+
   const [displayAmount, setDisplayAmount] = useState<BigNumber | undefined>();
   const [generalErrorMessage, setGeneralErrorMessage] = useState("");
   const [currentStatus, setCurrentStatus] = useState("");
@@ -39,6 +37,8 @@ export const MaspShield: React.FC = () => {
   const { data: availableAssets, isLoading: isLoadingAssets } = useAtomValue(
     namadaTransparentAssetsAtom
   );
+  const namadaChainRegistry = useAtomValue(namadaChainRegistryAtom);
+  const chain = namadaChainRegistry.data?.chain;
   const ledgerAccountInfo = ledgerStatus && {
     deviceConnected: ledgerStatus.connected,
     errorMessage: ledgerStatus.errorMessage,
@@ -51,7 +51,9 @@ export const MaspShield: React.FC = () => {
     (account) => account.type === AccountType.ShieldedKeys
   )?.address;
 
-  const selectedAssetAddress = searchParams.get(params.asset) || undefined;
+  const [selectedAssetAddress, setSelectedAssetAddress] = useUrlState(
+    params.asset
+  );
   const selectedAsset =
     selectedAssetAddress ? availableAssets?.[selectedAssetAddress] : undefined;
 
@@ -62,10 +64,12 @@ export const MaspShield: React.FC = () => {
     error,
     txKind,
     feeProps,
+    completedAt,
+    redirectToTransactionPage,
   } = useTransfer({
     source: sourceAddress ?? "",
     target: destinationAddress ?? "",
-    token: selectedAsset?.originalAddress ?? "",
+    token: selectedAsset?.asset.address ?? "",
     displayAmount: displayAmount ?? new BigNumber(0),
     onUpdateStatus: setCurrentStatus,
     onBeforeBuildTx: () => {
@@ -77,30 +81,16 @@ export const MaspShield: React.FC = () => {
     onBeforeSign: () => {
       setCurrentStatus("Waiting for signature...");
     },
-    onBeforeBroadcast: () => {
+    onBeforeBroadcast: async () => {
       setCurrentStatus("Broadcasting Shielding transaction...");
     },
-    onError: () => {
+    onError: async (originalError) => {
       setCurrentStatus("");
       setCurrentStatusExplanation("");
+      setGeneralErrorMessage((originalError as Error).message);
     },
     asset: selectedAsset?.asset,
   });
-
-  const onChangeSelectedAsset = (address?: Address): void => {
-    setSearchParams(
-      (currentParams) => {
-        const newParams = new URLSearchParams(currentParams);
-        if (address) {
-          newParams.set(params.asset, address);
-        } else {
-          newParams.delete(params.asset);
-        }
-        return newParams;
-      },
-      { replace: true }
-    );
-  };
 
   const onSubmitTransfer = async ({
     memo,
@@ -129,13 +119,19 @@ export const MaspShield: React.FC = () => {
         if (txList.length === 0) {
           throw "Couldn't create TransferData object";
         }
-        const tx = txList[0];
+        // We have to use the last element from list in case we revealPK
+        const tx = txList.pop()!;
         storeTransaction(tx);
       } else {
         throw "Invalid transaction response";
       }
     } catch (err) {
-      setGeneralErrorMessage(err + "");
+      // We only set the general error message if it is not already set by onError
+      if (generalErrorMessage === "") {
+        setGeneralErrorMessage(
+          err instanceof Error ? err.message : String(err)
+        );
+      }
     }
   };
 
@@ -143,14 +139,12 @@ export const MaspShield: React.FC = () => {
   setLedgerStatusStop(isPerformingTransfer);
 
   return (
-    <Panel className="relative min-h-[600px] flex-1">
-      <header className="flex flex-col items-center text-center mb-3 gap-6">
-        <h1 className="mt-6 text-lg text-yellow">Shield</h1>
+    <Panel className="rounded-sm flex flex-col flex-1 py-9">
+      <header className="flex flex-col items-center text-center mb-8 gap-6">
         <NamadaTransferTopHeader
           isSourceShielded={false}
           isDestinationShielded={true}
         />
-        <h2 className="text-lg">Namada Transparent to Namada Shielded</h2>
       </header>
       <TransferModule
         source={{
@@ -158,21 +152,21 @@ export const MaspShield: React.FC = () => {
           availableAssets,
           selectedAssetAddress,
           availableAmount: selectedAsset?.amount,
-          chain: namadaChain as Chain,
+          chain,
           availableWallets: [wallets.namada],
           wallet: wallets.namada,
           walletAddress: sourceAddress,
-          onChangeSelectedAsset,
+          onChangeSelectedAsset: setSelectedAssetAddress,
           amount: displayAmount,
           onChangeAmount: setDisplayAmount,
           ledgerAccountInfo,
         }}
         destination={{
-          chain: namadaChain as Chain,
+          chain,
           availableWallets: [wallets.namada],
           wallet: wallets.namada,
           walletAddress: destinationAddress,
-          isShielded: true,
+          isShieldedAddress: true,
         }}
         feeProps={feeProps}
         isSubmitting={isPerformingTransfer || isSuccess}
@@ -180,9 +174,11 @@ export const MaspShield: React.FC = () => {
         currentStatus={currentStatus}
         currentStatusExplanation={currentStatusExplanation}
         onSubmitTransfer={onSubmitTransfer}
+        completedAt={completedAt}
         buttonTextErrors={{
           NoAmount: "Define an amount to shield",
         }}
+        onComplete={redirectToTransactionPage}
       />
     </Panel>
   );

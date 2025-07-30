@@ -1,17 +1,23 @@
-import { Asset, AssetDenomUnit } from "@chain-registry/types";
-import namadaAssets from "@namada/chain-registry/namada/assetlist.json";
-import { ProposalStatus, ProposalTypeString } from "@namada/types";
-import { localnetConfigAtom } from "atoms/integrations/atoms";
+import { DenomUnit } from "@chain-registry/types";
+import {
+  BroadcastTxError,
+  ProposalStatus,
+  ProposalTypeString,
+  ResultCode,
+  TxMsgValue,
+} from "@namada/types";
+import { getNamadaChainAssetsMap } from "atoms/integrations/functions";
 import BigNumber from "bignumber.js";
-import { getDefaultStore } from "jotai";
+import invariant from "invariant";
 import { useEffect, useRef } from "react";
+import { Asset } from "types";
 
 export const proposalStatusToString = (status: ProposalStatus): string => {
   const statusText: Record<ProposalStatus, string> = {
     pending: "Upcoming",
     ongoing: "Ongoing",
-    passed: "Passed",
-    rejected: "Rejected",
+    executedRejected: "Rejected",
+    executedPassed: "Passed",
   };
 
   return statusText[status];
@@ -66,26 +72,18 @@ export const sumBigNumberArray = (numbers: BigNumber[]): BigNumber => {
   return BigNumber.sum(...numbers);
 };
 
-const findDisplayUnit = (asset: Asset): AssetDenomUnit | undefined => {
+const findDisplayUnit = (asset: Asset): DenomUnit | undefined => {
   const { display, denom_units } = asset;
   return denom_units.find((unit) => unit.denom === display);
 };
 
 export const namadaAsset = (): Asset => {
-  const store = getDefaultStore();
-  const config = store.get(localnetConfigAtom);
+  // This works for both housefire and mainnet because the native asset is the same
+  const namadaAssets = Object.values(getNamadaChainAssetsMap(false));
+  const nativeAsset = namadaAssets.find((asset) => asset.base === "unam");
+  invariant(nativeAsset, "Namada native asset not found");
 
-  const configTokenAddress = config.data?.tokenAddress;
-  const registryAsset = namadaAssets.assets[0];
-  const asset =
-    configTokenAddress ?
-      {
-        ...registryAsset,
-        address: configTokenAddress,
-      }
-    : registryAsset;
-
-  return asset satisfies Asset;
+  return nativeAsset;
 };
 
 export const isNamadaAsset = (asset?: Asset): boolean =>
@@ -112,4 +110,46 @@ export const toBaseAmount = (
     return displayAmount;
   }
   return displayAmount.shiftedBy(displayUnit.exponent);
+};
+
+export const toGasMsg = (gasLimit: BigNumber): string => {
+  return `Please raise the Gas Amount above the previously provided ${gasLimit} in the fee options for your transaction.`;
+};
+
+/**
+ * Returns formatted error message based on tx props and error code
+ */
+export const toErrorDetail = (
+  tx: TxMsgValue[],
+  error: BroadcastTxError
+): string => {
+  try {
+    const { code, info } = error.toProps();
+    const { args } = tx[0];
+    // TODO: Over time we may expand this to format errors for more result codes
+    switch (code) {
+      case ResultCode.TxGasLimit:
+        return `${error.toString()}.\n${toGasMsg(args.gasLimit)}`;
+      case ResultCode.WasmRuntimeError:
+        // We can only check error type by reading the error message
+        return `${error.toString()}.\n${textToErrorDetail(info, tx[0])}`;
+      case ResultCode.FeeError:
+        return `${error.toString()}.\n${textToErrorDetail(info, tx[0])}`;
+
+      default:
+        return error.toString() + ` ${info}`;
+    }
+  } catch (_e) {
+    return `${error.toString()}`;
+  }
+};
+
+export const textToErrorDetail = (text: string, tx: TxMsgValue): string => {
+  const { args } = tx;
+
+  if (text.includes("Gas error:")) {
+    return toGasMsg(args.gasLimit);
+  } else {
+    return text;
+  }
 };

@@ -68,6 +68,7 @@ export const TableWithPaginator = <T,>({
     );
   }, [page, itemList, onPageChange]);
 
+  // Show empty state only when no results
   if (rows.length === 0) {
     return (
       <div className="flex items-center justify-center text-sm py-4 text-neutral-200">
@@ -80,7 +81,7 @@ export const TableWithPaginator = <T,>({
     <div
       ref={containerRef}
       className={clsx(
-        "grid grid-rows-[auto_max-content] flex-1 overflow-hidden w-full gap-2"
+        "grid grid-rows-[1fr_auto] flex-1 overflow-hidden w-full gap-2"
       )}
     >
       {styledTable}

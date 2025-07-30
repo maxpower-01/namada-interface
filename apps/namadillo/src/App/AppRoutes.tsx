@@ -11,8 +11,10 @@ import {
 } from "react-router-dom";
 import { AccountOverview } from "./AccountOverview";
 import { App } from "./App";
+import { BugReport } from "./Common/BugReport";
 import { NotFound } from "./Common/NotFound";
 import { RouteErrorBoundary } from "./Common/RouteErrorBoundary";
+import { ShieldAssetsModal } from "./Common/ShieldAssetsModal";
 import { GovernanceOverview } from "./Governance/GovernanceOverview";
 import { ProposalAndVote } from "./Governance/ProposalAndVote";
 import { SubmitVote } from "./Governance/SubmitVote";
@@ -23,7 +25,6 @@ import { IbcTransfer } from "./Ibc/IbcTransfer";
 import { IbcTransfersLayout } from "./Ibc/IbcTransfersLayout";
 import { IbcWithdraw } from "./Ibc/IbcWithdraw";
 import { MaspLayout } from "./Masp/MaspLayout";
-import { MaspOverview } from "./Masp/MaspOverview";
 import { MaspShield } from "./Masp/MaspShield";
 import { MaspUnshield } from "./Masp/MaspUnshield";
 import { NamadaTransfer } from "./NamadaTransfer/NamadaTransfer";
@@ -40,6 +41,7 @@ import IncrementBonding from "./Staking/IncrementBonding";
 import { ReDelegate } from "./Staking/ReDelegate";
 import { StakingOverview } from "./Staking/StakingOverview";
 import { StakingRewards } from "./Staking/StakingRewards";
+import { StakingWithdrawModal } from "./Staking/StakingWithdrawModal";
 import { Unstake } from "./Staking/Unstake";
 import { SwitchAccountPanel } from "./SwitchAccount/SwitchAccountPanel";
 import { TransactionDetails } from "./Transactions/TransactionDetails";
@@ -92,9 +94,8 @@ export const MainRoutes = (): JSX.Element => {
           {/* Masp */}
           {features.maspEnabled && (
             <Route element={<MaspLayout />}>
-              <Route path={routes.masp} element={<MaspOverview />} />
-              <Route path={routes.maspShield} element={<MaspShield />} />
-              <Route path={routes.maspUnshield} element={<MaspUnshield />} />
+              <Route path={routes.shield} element={<MaspShield />} />
+              <Route path={routes.unshield} element={<MaspUnshield />} />
             </Route>
           )}
 
@@ -131,6 +132,7 @@ export const MainRoutes = (): JSX.Element => {
           )}
 
           {/* Other */}
+          <Route path={routes.bugReport} element={<BugReport />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>
@@ -157,9 +159,14 @@ export const MainRoutes = (): JSX.Element => {
           {/* Other Modals */}
           <Route path={routes.switchAccount} element={<SwitchAccountPanel />} />
           <Route path={routes.signMessages} element={<SignMessages />} />
+          <Route path={routes.shieldAssets} element={<ShieldAssetsModal />} />
           <Route
             path={routes.stakingClaimRewards}
             element={<StakingRewards />}
+          />
+          <Route
+            path={routes.stakingWithdrawal}
+            element={<StakingWithdrawModal />}
           />
         </Route>
       </Routes>

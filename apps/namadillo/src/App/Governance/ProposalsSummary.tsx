@@ -19,10 +19,13 @@ export const ProposalsSummary: React.FC<{
     ({ status }) => status === "ongoing"
   ).length;
   const passed = allProposals.filter(
-    ({ status }) => status === "passed"
+    ({ status }) => status === "executedPassed"
   ).length;
   const rejected = allProposals.filter(
-    ({ status }) => status === "rejected"
+    ({ status }) => status === "executedRejected"
+  ).length;
+  const executed = allProposals.filter(
+    ({ status }) => status === "executedPassed" || status === "executedRejected"
   ).length;
 
   return (
@@ -31,6 +34,7 @@ export const ProposalsSummary: React.FC<{
       <SummaryCard title="Proposals in Voting Period" content={ongoing} />
       <SummaryCard title="Passed" content={passed} />
       <SummaryCard title="Rejected" content={rejected} />
+      <SummaryCard title="Executed" content={executed} />
     </Stack>
   );
 };

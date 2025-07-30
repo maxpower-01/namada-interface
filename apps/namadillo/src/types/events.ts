@@ -1,16 +1,17 @@
 import {
   BondProps,
+  ClaimRewardsProps,
   RedelegateProps,
   TxProps,
   UnbondProps,
   VoteProposalProps,
   WithdrawProps,
 } from "@namada/types";
-import { ClaimRewardsProps, TransferTransactionData } from "types";
+import { TransferTransactionData } from "types";
 import { TxKind } from "types/txKind";
 
 export type TransactionEventsClasses = Partial<TxKind>;
-
+export type TransactionEventTypes = TxKind | TxKind[];
 export type TransactionEventsStatus =
   | "Pending"
   | "Error"
@@ -32,7 +33,7 @@ export interface EventData<T> extends CustomEvent {
     data: T[];
     // If event is for PartialSuccess, use the following:
     successData?: T[];
-    failedData?: T[];
+    failedData?: { value: T; error?: string }[];
     error?: Error;
   };
 }
@@ -51,6 +52,7 @@ declare global {
     "Withdraw.Success": EventData<WithdrawProps>;
     "Withdraw.Error": EventData<WithdrawProps>;
     "ClaimRewards.Success": EventData<ClaimRewardsProps>;
+    "ClaimRewards.PartialSuccess": EventData<ClaimRewardsProps>;
     "ClaimRewards.Error": EventData<ClaimRewardsProps>;
     "VoteProposal.Success": EventData<VoteProposalProps>;
     "VoteProposal.Error": EventData<VoteProposalProps>;
@@ -66,5 +68,7 @@ declare global {
     "IbcTransfer.Error": CustomEvent<TransferTransactionData>;
     "IbcWithdraw.Success": CustomEvent<TransferTransactionData>;
     "IbcWithdraw.Error": CustomEvent<TransferTransactionData>;
+    "ShieldedIbcWithdraw.Success": CustomEvent<TransferTransactionData>;
+    "ShieldedIbcWithdraw.Error": CustomEvent<TransferTransactionData>;
   }
 }

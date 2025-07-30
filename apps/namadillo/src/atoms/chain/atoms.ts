@@ -1,8 +1,7 @@
-import { Asset } from "@chain-registry/types";
-import namadaAssets from "@namada/chain-registry/namada/assetlist.json";
 import namada from "@namada/chains/chains/namada";
 import { IbcToken, NativeToken } from "@namada/indexer-client";
 import { indexerApiAtom } from "atoms/api";
+import { namadaRegistryChainAssetsMapAtom } from "atoms/integrations";
 import {
   defaultServerConfigAtom,
   indexerUrlAtom,
@@ -10,15 +9,20 @@ import {
 } from "atoms/settings";
 import { queryDependentFn } from "atoms/utils";
 import BigNumber from "bignumber.js";
-import * as osmosis from "chain-registry/mainnet/osmosis";
+import invariant from "invariant";
 import { atom } from "jotai";
 import { atomWithQuery } from "jotai-tanstack-query";
-import { Address, ChainParameters, ChainSettings, ChainStatus } from "types";
-import { findAssetByToken } from "utils/assets";
+import {
+  ChainParameters,
+  ChainSettings,
+  ChainStatus,
+  MaspAssetRewards,
+} from "types";
 import { calculateUnbondingPeriod } from "./functions";
 import {
   fetchChainParameters,
   fetchChainTokens,
+  fetchMaspRewards,
   fetchRpcUrlFromIndexer,
 } from "./services";
 
@@ -74,33 +78,6 @@ export const chainTokensAtom = atomWithQuery<(NativeToken | IbcToken)[]>(
   }
 );
 
-export const chainAssetsMapAtom = atom<Record<Address, Asset | undefined>>(
-  (get) => {
-    const nativeTokenAddress = get(nativeTokenAddressAtom);
-    const chainTokensQuery = get(chainTokensAtom);
-
-    const chainAssetsMap: Record<Address, Asset> = {};
-    if (nativeTokenAddress.data) {
-      // the first asset is the native token asset
-      chainAssetsMap[nativeTokenAddress.data] = namadaAssets.assets[0];
-    }
-    // TODO
-    // while we don't have all assets listed on namada-chain-registry,
-    // merge the osmosis assets to guarantee the most common ones to be available
-    const assetList: Asset[] = [
-      ...namadaAssets.assets,
-      ...osmosis.assets.assets,
-    ];
-    chainTokensQuery.data?.forEach((token) => {
-      const asset = findAssetByToken(token, assetList);
-      if (asset) {
-        chainAssetsMap[token.address] = asset;
-      }
-    });
-    return chainAssetsMap;
-  }
-);
-
 // Prefer calling settings@rpcUrlAtom instead, because default rpc url might be
 // overrided by the user
 export const indexerRpcUrlAtom = atomWithQuery<string>((get) => {
@@ -127,9 +104,24 @@ export const chainParametersAtom = atomWithQuery<ChainParameters>((get) => {
         ...parameters,
         apr: BigNumber(parameters.apr),
         unbondingPeriod: calculateUnbondingPeriod(parameters),
+        maxBlockTime: Number(parameters.maxBlockTime),
+        checksums: parameters.checksums.current,
       };
     },
   };
 });
 
 export const chainStatusAtom = atom<ChainStatus | undefined>();
+
+export const maspRewardsAtom = atomWithQuery((get) => {
+  const chainAssetsMap = get(namadaRegistryChainAssetsMapAtom);
+
+  return {
+    queryKey: ["masp-rewards", chainAssetsMap.data],
+    ...queryDependentFn(async (): Promise<MaspAssetRewards[]> => {
+      invariant(chainAssetsMap.data, "No chain assets map");
+
+      return await fetchMaspRewards(Object.values(chainAssetsMap.data));
+    }, [chainAssetsMap]),
+  };
+});

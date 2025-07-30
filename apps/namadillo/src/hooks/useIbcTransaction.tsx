@@ -6,6 +6,7 @@ import {
   UseQueryResult,
 } from "@tanstack/react-query";
 import { TokenCurrency } from "App/Common/TokenCurrency";
+import { chainParametersAtom } from "atoms/chain";
 import {
   broadcastIbcTransactionAtom,
   createStargateClient,
@@ -27,7 +28,7 @@ import {
 import { useState } from "react";
 import {
   Address,
-  AddressWithAssetAndAmount,
+  Asset,
   ChainRegistryEntry,
   GasConfig,
   IbcTransferStage,
@@ -45,7 +46,7 @@ type useIbcTransactionProps = {
   sourceChannel?: string;
   shielded?: boolean;
   destinationChannel?: Address;
-  selectedAsset?: AddressWithAssetAndAmount;
+  selectedAsset?: Asset;
 };
 
 type useIbcTransactionOutput = {
@@ -74,11 +75,13 @@ export const useIbcTransaction = ({
 }: useIbcTransactionProps): useIbcTransactionOutput => {
   const broadcastIbcTx = useAtomValue(broadcastIbcTransactionAtom);
   const dispatchNotification = useSetAtom(dispatchToastNotificationAtom);
+  const chainParameters = useAtomValue(chainParametersAtom);
   const [txHash, setTxHash] = useState<string | undefined>();
   const [rpcUrl, setRpcUrl] = useState<string | undefined>();
   const [stargateClient, setStargateClient] = useState<
     SigningStargateClient | undefined
   >();
+  const destinationChainId = chainParameters.data?.chainId;
 
   // Avoid the same client being created twice for the same chain and provide
   // a way to refetch the query in case it throws an error trying to connect to the RPC
@@ -110,7 +113,7 @@ export const useIbcTransaction = ({
   const dispatchPendingTxNotification = (tx: TransferTransactionData): void => {
     invariant(tx.hash, "Error: Transaction hash not provided");
     dispatchNotification({
-      id: createNotificationId(tx.hash),
+      id: createNotificationId([tx.hash]),
       title: "IBC transfer transaction in progress",
       description: (
         <>
@@ -126,7 +129,7 @@ export const useIbcTransaction = ({
   const dispatchErrorTxNotification = (error: unknown): void => {
     if (!txHash) return;
     dispatchNotification({
-      id: createNotificationId(txHash),
+      id: createNotificationId([txHash]),
       title: "IBC transfer transaction failed",
       description: "",
       details: error instanceof Error ? error.message : undefined,
@@ -185,16 +188,26 @@ export const useIbcTransaction = ({
           gasConfigQuery.error?.message
       );
 
-      const baseAmount = toBaseAmount(selectedAsset.asset, displayAmount);
+      const baseAmount = toBaseAmount(selectedAsset, displayAmount);
 
       // This step might require a bit of time
       const { memo: maspCompatibleMemo, receiver: maspCompatibleReceiver } =
         await (async () => {
           onUpdateStatus?.("Generating MASP parameters...");
+          const assetTrace = selectedAsset.traces?.find(
+            (trace) => trace.type === "ibc"
+          );
+
+          // For genShieldedArgs we have to pass the ibc trace path on destination chain,
+          // for native assets we use the base denom
+          const assetTracePath =
+            assetTrace ? assetTrace.chain.path : selectedAsset.base;
+          invariant(assetTracePath, "Asset trace path is required");
+
           return shielded ?
               await getShieldedArgs(
                 destinationAddress,
-                selectedAsset.originalAddress,
+                assetTracePath,
                 baseAmount,
                 destinationChannel!
               )
@@ -202,12 +215,13 @@ export const useIbcTransaction = ({
         })();
 
       const chainId = registry.chain.chain_id;
+
       const transferMsg = createIbcTransferMessage(
         sanitizeChannel(sourceChannel!),
         sanitizeAddress(sourceAddress),
         sanitizeAddress(maspCompatibleReceiver),
         baseAmount,
-        selectedAsset.originalAddress,
+        selectedAsset.base,
         maspCompatibleMemo
       );
 
@@ -227,8 +241,9 @@ export const useIbcTransaction = ({
       const tx = createTransferDataFromIbc(
         txResponse,
         rpcUrl || "",
-        selectedAsset.asset,
+        selectedAsset,
         chainId,
+        destinationChainId || "",
         getIbcTransferStage(!!shielded),
         !!shielded
       );

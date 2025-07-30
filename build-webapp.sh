@@ -23,6 +23,9 @@ if [[ -d "$DEST_DIR" ]]; then
 fi
 
 # from the namada-interface README, modified for compatibility
+apt-get update
+apt-get install build-essential
+
 apt-get install -y curl
 
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -34,13 +37,14 @@ apt-get install -y libssl-dev
 apt-get install -y protobuf-compiler
 
 rustup target add wasm32-unknown-unknown
+rustup toolchain add nightly-2025-03-27
 curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
 yarn || exit 1
 yarn prepare || exit 1
 
-yarn --cwd ${PKG_DIR} wasm:build || exit 1
-yarn --cwd ${PKG_DIR} build || exit 1
+yarn --cwd ${PKG_DIR} wasm:build:multicore || exit 1
+yarn --cwd ${PKG_DIR} build:only || exit 1
 
 if [[ ! -d "$OUTPUT_DIR" ]]; then
   echo "Missing output directory: $OUTPUT_DIR" 1>&2

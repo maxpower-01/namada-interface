@@ -1,4 +1,9 @@
-import { Asset, AssetList, Chain, IBCInfo } from "@chain-registry/types";
+import {
+  AssetList,
+  Chain,
+  Asset as ChainRegistryAsset,
+  IBCInfo,
+} from "@chain-registry/types";
 import { ValidatorStatus } from "@namada/indexer-client";
 import {
   Account,
@@ -68,6 +73,7 @@ export type SettingsTomlOptions = {
   masp_indexer_url?: string;
   rpc_url?: string;
   localnet_enabled?: boolean;
+  fathom_site_id?: string;
 };
 
 export type ChainParameters = {
@@ -76,6 +82,7 @@ export type ChainParameters = {
   nativeTokenAddress: Address;
   unbondingPeriod: string;
   checksums: Record<string, string>;
+  maxBlockTime: number;
 };
 
 export type SettingsStorage = {
@@ -84,7 +91,7 @@ export type SettingsStorage = {
   indexerUrl: string;
   maspIndexerUrl?: string;
   signArbitraryEnabled: boolean;
-  enableTestnets?: boolean;
+  advancedMode?: boolean;
 };
 
 export type RpcStorage = {
@@ -211,13 +218,28 @@ export type ChainRegistryEntry = {
   ibc?: IBCInfo[];
 };
 
-export type AddressWithAsset = {
-  originalAddress: Address;
-  asset: Asset;
+export type NamadaChainRegistryEntry = ChainRegistryEntry & {
+  assets: AssetList & { assets: NamadaAsset[] };
 };
 
-export type AddressWithAssetAndAmount = AddressWithAsset & {
+export type Asset = ChainRegistryAsset;
+
+// Namada assets should always have address field defined
+export type NamadaAsset = Asset & { address: Address };
+
+export type AssetWithAmount = {
+  asset: Asset;
   amount: BigNumber;
+};
+
+export type NamadaAssetWithAmount = {
+  asset: NamadaAsset;
+  amount: BigNumber;
+};
+
+export type AssetWithMinDenomAmount = {
+  asset: Asset;
+  minDenomAmount: BigNumber;
 };
 
 export type Coin = {
@@ -225,10 +247,17 @@ export type Coin = {
   minDenomAmount: string;
 };
 
-export type AddressWithAssetAndAmountMap = Record<
-  Address,
-  AddressWithAssetAndAmount
->;
+export type TokenBalance = {
+  address: Address;
+  asset: Asset;
+  amount: BigNumber;
+  dollar?: BigNumber;
+};
+
+export type IbcChannels = {
+  namadaChannel: string;
+  ibcChannel: string;
+};
 
 export enum TransferStep {
   Sign = "sign",
@@ -274,6 +303,12 @@ export const namadaTransferStages = {
 
 // Defines the steps in the IBC <> Namada transfer progress for tracking transaction stages.
 export const ibcTransferStages = {
+  ShieldedToIbc: [
+    TransferStep.Sign,
+    TransferStep.IbcWithdraw,
+    TransferStep.WaitingConfirmation,
+    TransferStep.Complete,
+  ] as const,
   TransparentToIbc: [
     TransferStep.Sign,
     TransferStep.IbcWithdraw,
@@ -302,23 +337,6 @@ export const allTransferStages = {
 
 export const transferPossibleStages = [
   ...new Set(Object.values(allTransferStages).flat()),
-] as const;
-
-export const transparentTransferTypes: Array<keyof AllTransferStages> = [
-  "ShieldedToTransparent",
-  "TransparentToIbc",
-  "TransparentToTransparent",
-  "IbcToTransparent",
-] as const;
-
-export const ibcTransferTypes: Array<keyof AllTransferStages> = [
-  "IbcToTransparent",
-  "TransparentToIbc",
-  "IbcToShielded",
-] as const;
-
-export const allTransferTypes = [
-  ...ibcTransferTypes.concat(transparentTransferTypes),
 ] as const;
 
 type NamadaTransferStages = typeof namadaTransferStages;
@@ -350,11 +368,13 @@ export type TransferStage = IbcTransferStage | NamadaTransferStage;
 export type BaseTransferTransaction = TransferStage & {
   rpc: string;
   asset: Asset;
-  hash?: string;
+  hash: string;
+  innerHash: string;
   displayAmount: BigNumber;
   chainId: string;
   sourceAddress: string;
   destinationAddress: string;
+  destinationChainId?: string;
   feePaid?: BigNumber;
   tipPaid?: BigNumber;
   resultTxHash?: string;
@@ -364,6 +384,7 @@ export type BaseTransferTransaction = TransferStage & {
   shielded?: boolean;
   createdAt: Date;
   updatedAt: Date;
+  timestamp?: number;
 };
 
 export type IbcTransferTransactionData = BaseTransferTransaction & {
@@ -397,4 +418,13 @@ export type LocalnetToml = {
 export type LedgerAccountInfo = {
   deviceConnected: boolean;
   errorMessage: string;
+};
+
+export type MaspAssetRewards = {
+  asset: Asset;
+  address: Address | undefined;
+  kdGain: BigNumber;
+  kpGain: BigNumber;
+  lockedAmountTarget: BigNumber;
+  maxRewardRate: BigNumber;
 };

@@ -3,6 +3,8 @@ import {
   AccountType,
   BparamsMsgValue,
   GenDisposableSignerResponse,
+  IbcTransferMsgValue,
+  IbcTransferProps,
   ShieldedTransferMsgValue,
   ShieldedTransferProps,
   ShieldingTransferMsgValue,
@@ -18,7 +20,12 @@ import { NamadaKeychain } from "hooks/useNamadaKeychain";
 import { buildTx, EncodedTxData, isPublicKeyRevealed } from "lib/query";
 import { Address, ChainSettings, GasConfig } from "types";
 import { getSdkInstance } from "utils/sdk";
-import { Shield, ShieldedTransfer, Unshield } from "workers/MaspTxMessages";
+import {
+  IbcTransfer,
+  Shield,
+  ShieldedTransfer,
+  Unshield,
+} from "workers/MaspTxMessages";
 import {
   registerTransferHandlers as maspTxRegisterTransferHandlers,
   Worker as MaspTxWorkerApi,
@@ -35,11 +42,11 @@ export type WorkerTransferParams = {
 
 const workerBuildTxPair = async <T>({
   rpcUrl,
-  token,
+  nativeToken,
   buildTxFn,
 }: {
   rpcUrl: string;
-  token: Address;
+  nativeToken: Address;
   buildTxFn: (
     workerLink: Comlink.Remote<MaspTxWorkerApi>
   ) => Promise<EncodedTxData<T>>;
@@ -49,7 +56,7 @@ const workerBuildTxPair = async <T>({
   const workerLink = Comlink.wrap<MaspTxWorkerApi>(worker);
   await workerLink.init({
     type: "init",
-    payload: { rpcUrl, token, maspIndexerUrl: "" },
+    payload: { rpcUrl, token: nativeToken, maspIndexerUrl: "" },
   });
   const encodedTxData = await buildTxFn(workerLink);
   worker.terminate();
@@ -59,12 +66,24 @@ const workerBuildTxPair = async <T>({
 export const getDisposableSigner =
   async (): Promise<GenDisposableSignerResponse> => {
     const namada = await new NamadaKeychain().get();
-    const disposableSigner = await namada?.genDisposableKeypair();
+    const disposableSigner = await namada?.getSigner().genDisposableKeypair();
     if (!disposableSigner) {
       throw new Error("No signer available");
     }
     return disposableSigner;
   };
+
+export const persistDisposableSigner = async (
+  address: string
+): Promise<void> => {
+  const namada = await new NamadaKeychain().get();
+  await namada?.getSigner().persistDisposableKeypair(address);
+};
+
+export const clearDisposableSigner = async (address: string): Promise<void> => {
+  const namada = await new NamadaKeychain().get();
+  await namada?.getSigner().clearDisposableKeypair(address);
+};
 
 export const createTransparentTransferTx = async (
   chain: ChainSettings,
@@ -114,7 +133,7 @@ export const createShieldedTransferTx = async (
 
   return await workerBuildTxPair({
     rpcUrl,
-    token,
+    nativeToken: chain.nativeTokenAddress,
     buildTxFn: async (workerLink) => {
       const msgValue = new ShieldedTransferMsgValue({
         gasSpendingKey: source,
@@ -166,7 +185,7 @@ export const createShieldingTransferTx = async (
 
   return await workerBuildTxPair({
     rpcUrl,
-    token,
+    nativeToken: chain.nativeTokenAddress,
     buildTxFn: async (workerLink) => {
       const publicKeyRevealed = await isPublicKeyRevealed(account.address);
       const msgValue = new ShieldingTransferMsgValue({
@@ -220,7 +239,7 @@ export const createUnshieldingTransferTx = async (
 
   return await workerBuildTxPair({
     rpcUrl,
-    token,
+    nativeToken: chain.nativeTokenAddress,
     buildTxFn: async (workerLink) => {
       const msgValue = new UnshieldingTransferMsgValue({
         source,
@@ -242,6 +261,58 @@ export const createUnshieldingTransferTx = async (
         },
       };
       return (await workerLink.unshield(msg)).payload;
+    },
+  });
+};
+
+export const createIbcTx = async (
+  chain: ChainSettings,
+  account: Account,
+  props: IbcTransferProps[],
+  gasConfig: GasConfig,
+  rpcUrl: string,
+  signerPublicKey: string,
+  memo?: string
+): Promise<EncodedTxData<IbcTransferProps>> => {
+  let bparams: BparamsMsgValue[] | undefined;
+  if (account.type === AccountType.Ledger) {
+    const sdk = await getSdkInstance();
+    const ledger = await sdk.initLedger();
+    bparams = await ledger.getBparams();
+    ledger.closeTransport();
+  }
+
+  return await workerBuildTxPair({
+    rpcUrl,
+    nativeToken: chain.nativeTokenAddress,
+    buildTxFn: async (workerLink) => {
+      const msgValue = new IbcTransferMsgValue({
+        ...props[0],
+        gasSpendingKey: props[0].gasSpendingKey,
+        bparams,
+      });
+
+      // We only check if we need to reveal the public key if the gas spending key is not provided
+      const publicKeyRevealed =
+        Boolean(msgValue.gasSpendingKey) ||
+        (await isPublicKeyRevealed(account.address));
+
+      const msg: IbcTransfer = {
+        type: "ibc-transfer",
+        payload: {
+          account: {
+            ...account,
+            publicKey: signerPublicKey,
+          },
+          gasConfig,
+          props: [msgValue],
+          chain,
+          memo,
+          publicKeyRevealed,
+        },
+      };
+
+      return (await workerLink.ibcTransfer(msg)).payload;
     },
   });
 };

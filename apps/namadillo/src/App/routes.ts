@@ -7,6 +7,7 @@ export const routes = {
   stakingBondingRedelegate: "/staking/bonding/redelegate",
   stakingBondingUnstake: "/staking/bonding/unstake",
   stakingClaimRewards: "/staking/claim-rewards",
+  stakingWithdrawal: "/staking/withdraw",
 
   // Governance
   governance: "/governance",
@@ -15,9 +16,9 @@ export const routes = {
   governanceJson: "/governance/json/:proposalId",
 
   // Masp
-  masp: "/masp",
-  maspShield: "/masp/shield",
-  maspUnshield: "/masp/unshield",
+  shield: "/shield",
+  unshield: "/unshield",
+  shieldAssets: "/shield-assets",
 
   // Ibc
   ibc: "/ibc",
@@ -28,6 +29,7 @@ export const routes = {
   transfer: "/transfer",
   history: "/history",
   transaction: "/transaction/:hash",
+  receive: "/receive",
 
   // Settings
   settings: "/settings",
@@ -40,6 +42,7 @@ export const routes = {
   // Other
   switchAccount: "/switch-account",
   signMessages: "/sign-messages",
+  bugReport: "/bug-report",
 } as const;
 
 export const params = {

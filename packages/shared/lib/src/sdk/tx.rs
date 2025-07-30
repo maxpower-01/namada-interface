@@ -3,13 +3,14 @@ use std::str::FromStr;
 
 use gloo_utils::format::JsValueSerdeExt;
 use namada_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
+use namada_sdk::collections::HashSet;
 use namada_sdk::masp_primitives::transaction::components::sapling::builder::StoredBuildParams;
 use namada_sdk::masp_primitives::transaction::components::sapling::fees::{InputView, OutputView};
 use namada_sdk::masp_primitives::zip32::ExtendedFullViewingKey;
 use namada_sdk::signing::SigningTxData;
-use namada_sdk::token::{Amount, DenominatedAmount};
+use namada_sdk::token::{Amount, DenominatedAmount, Transfer};
 use namada_sdk::tx::data::compute_inner_tx_hash;
-use namada_sdk::tx::either::Either;
+use namada_sdk::tx::either::{self, Either};
 use namada_sdk::tx::{
     self, TX_BOND_WASM, TX_CLAIM_REWARDS_WASM, TX_IBC_WASM, TX_REDELEGATE_WASM, TX_REVEAL_PK,
     TX_TRANSFER_WASM, TX_UNBOND_WASM, TX_VOTE_PROPOSAL, TX_WITHDRAW_WASM,
@@ -70,7 +71,11 @@ impl SigningData {
             None => None,
         };
 
-        let fee_payer = signing_tx_data.fee_payer.to_string();
+        let fee_payer = match signing_tx_data.fee_payer {
+            Either::Left(f) => f.0.to_string(),
+            Either::Right(_) => return Err(JsError::new("Fee payer must be a public key")),
+        };
+
         let threshold = signing_tx_data.threshold;
         let shielded_hash = match signing_tx_data.shielded_hash {
             Some(v) => Some(borsh::to_vec(&v)?),
@@ -99,13 +104,14 @@ impl SigningData {
             None => None,
         };
 
-        let mut public_keys: Vec<PublicKey> = vec![];
+        let mut public_keys: HashSet<PublicKey> = HashSet::new();
         for pk in self.public_keys.clone() {
             let pk = PublicKey::from_str(&pk)?;
-            public_keys.push(pk);
+            public_keys.insert(pk);
         }
 
         let fee_payer = PublicKey::from_str(&self.fee_payer)?;
+        let fee_payer = either::Left((fee_payer, false));
         let threshold = self.threshold;
         let account_public_keys_map = match &self.account_public_keys_map {
             Some(pk_map) => Some(borsh::from_slice(pk_map)?),
@@ -121,6 +127,8 @@ impl SigningData {
             public_keys,
             fee_payer,
             threshold,
+            // Assume no signatures at this point
+            signatures: vec![],
             account_public_keys_map,
             shielded_hash,
         })
@@ -304,10 +312,7 @@ impl TxDetails {
                 let token = wrapper.fee.token.to_string();
                 let wrapper_fee_payer = wrapper.fee_payer();
 
-                let expiration: Option<u64> = match expiration {
-                    Some(exp) => Some(exp.to_unix_timestamp() as u64),
-                    None => None,
-                };
+                let expiration: Option<u64> = expiration.map(|exp| exp.to_unix_timestamp() as u64);
 
                 let wrapper_tx = WrapperTxMsg::new(
                     token,
@@ -376,77 +381,88 @@ fn get_masp_details(
     tx: &tx::Tx,
     tx_kind: &transaction::TransactionKind,
 ) -> (Option<Vec<TxIn>>, Option<Vec<TxOut>>) {
-    match tx_kind {
-        transaction::TransactionKind::Transfer(transfer) => {
-            if let Some(shielded_hash) = transfer.shielded_section_hash {
-                let masp_builder = tx
-                    .get_masp_builder(&shielded_hash)
-                    .expect("Masp builder to exist");
+    let parse = |transfer: &Transfer| {
+        if let Some(shielded_hash) = transfer.shielded_section_hash {
+            let masp_builder = tx
+                .get_masp_builder(&shielded_hash)
+                .expect("Masp builder to exist");
 
-                let asset_types = &masp_builder.asset_types;
+            let asset_types = &masp_builder.asset_types;
 
-                let inputs = masp_builder
-                    .builder
-                    .sapling_inputs()
-                    .iter()
-                    .map(|input| {
-                        let asset_data = asset_types
-                            .iter()
-                            .find(|ad| ad.encode().unwrap() == input.asset_type())
-                            .expect("Asset data to exist");
+            let inputs = masp_builder
+                .builder
+                .sapling_inputs()
+                .iter()
+                .map(|input| {
+                    let asset_data = asset_types
+                        .iter()
+                        .find(|ad| ad.encode().unwrap() == input.asset_type())
+                        .expect("Asset data to exist");
 
-                        let amount = Amount::from_u64(input.value());
-                        let denominated_amount = DenominatedAmount::new(amount, asset_data.denom);
+                    let amount = Amount::from_u64(input.value());
+                    let denominated_amount = DenominatedAmount::new(amount, asset_data.denom);
 
-                        TxIn {
-                            token: asset_data.token.to_string(),
-                            value: denominated_amount.to_string(),
-                            owner: ExtendedViewingKey::from(*input.key()).to_string(),
-                        }
-                    })
-                    .collect::<Vec<_>>();
+                    TxIn {
+                        token: asset_data.token.to_string(),
+                        value: denominated_amount.to_string(),
+                        owner: ExtendedViewingKey::from(*input.key()).to_string(),
+                    }
+                })
+                .collect::<Vec<_>>();
 
-                let outputs = masp_builder
-                    .builder
-                    .sapling_outputs()
-                    .iter()
-                    .map(|output| {
-                        let asset_data = asset_types
-                            .iter()
-                            .find(|ad| ad.encode().unwrap() == output.asset_type())
-                            .expect("Asset data to exist");
+            let outputs = masp_builder
+                .builder
+                .sapling_outputs()
+                .iter()
+                .map(|output| {
+                    let asset_data = asset_types
+                        .iter()
+                        .find(|ad| ad.encode().unwrap() == output.asset_type())
+                        .expect("Asset data to exist");
 
-                        let amount = Amount::from_u64(output.value());
-                        let denominated_amount = DenominatedAmount::new(amount, asset_data.denom);
+                    let amount = Amount::from_u64(output.value());
+                    let denominated_amount = DenominatedAmount::new(amount, asset_data.denom);
 
-                        TxOut {
-                            token: { asset_data.token.to_string() },
-                            value: denominated_amount.to_string(),
-                            address: PaymentAddress::from(output.address()).to_string(),
-                        }
-                    })
-                    .collect::<Vec<_>>();
+                    TxOut {
+                        token: { asset_data.token.to_string() },
+                        value: denominated_amount.to_string(),
+                        address: PaymentAddress::from(output.address()).to_string(),
+                    }
+                })
+                .collect::<Vec<_>>();
 
-                (Some(inputs), Some(outputs))
-            } else {
-                (None, None)
-            }
+            (Some(inputs), Some(outputs))
+        } else {
+            (None, None)
         }
+    };
+
+    match tx_kind {
+        transaction::TransactionKind::IbcTransfer(ibc_transfer) => match &ibc_transfer.transfer {
+            Some(transfer) => parse(transfer),
+            None => (None, None),
+        },
+        transaction::TransactionKind::Transfer(transfer) => parse(transfer),
         _ => (None, None),
     }
 }
 
 #[wasm_bindgen]
-#[derive(BorshSerialize, BorshDeserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Debug)]
 #[borsh(crate = "namada_sdk::borsh")]
 pub struct BatchTxResult {
     hash: String,
-    is_applied: bool,
+    pub is_applied: bool,
+    error: Option<String>,
 }
 
 impl BatchTxResult {
-    pub fn new(hash: String, is_applied: bool) -> BatchTxResult {
-        BatchTxResult { hash, is_applied }
+    pub fn new(hash: String, is_applied: bool, error: Option<String>) -> BatchTxResult {
+        BatchTxResult {
+            hash,
+            is_applied,
+            error,
+        }
     }
 }
 
@@ -455,7 +471,7 @@ impl BatchTxResult {
 #[derive(BorshSerialize, BorshDeserialize)]
 #[borsh(crate = "namada_sdk::borsh")]
 pub struct TxResponse {
-    code: String,
+    code: u8,
     commitments: Vec<BatchTxResult>,
     gas_used: String,
     hash: String,
@@ -466,7 +482,7 @@ pub struct TxResponse {
 
 impl TxResponse {
     pub fn new(
-        code: String,
+        code: u8,
         commitments: Vec<BatchTxResult>,
         gas_used: String,
         hash: String,

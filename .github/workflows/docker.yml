@@ -3,9 +3,11 @@ name: Docker Namadillo 🐳
 on:
   push:
     tags:
-      - namadillo@v*
+      - 'namadillo@v*'
     branches:
       - main
+      - stable-interface
+  workflow_dispatch:
 
 env:
   GIT_LFS_SKIP_SMUDGE: 1
@@ -47,7 +49,7 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/namadillo@v* ]]; then
             echo "IMAGE_TAG=namadillo-${GITHUB_REF#refs/tags/namadillo@}" >> $GITHUB_ENV
           else
-            echo "IMAGE_TAG=namadillo-main" >> $GITHUB_ENV
+            echo "IMAGE_TAG=namadillo-${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
           fi
 
       - name: Docker meta

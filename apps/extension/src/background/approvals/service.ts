@@ -61,6 +61,7 @@ export class ApprovalsService {
   async approveSignTx(
     signer: string,
     txs: EncodedTxData[],
+    origin: string,
     checksums?: Record<string, string>
   ): Promise<Uint8Array[]> {
     if (await this.isLocked()) {
@@ -78,6 +79,7 @@ export class ApprovalsService {
     if (!details) {
       throw new Error(ApprovalErrors.AccountNotFound(signer));
     }
+    const [account] = details;
 
     const pendingTx: PendingTx = {
       signer,
@@ -88,13 +90,14 @@ export class ApprovalsService {
     await this.txStore.set(msgId, pendingTx);
 
     return this.launchApprovalPopup(
-      `${TopLevelRoute.ApproveSignTx}/${msgId}/${details.type}/${signer}`
+      `${TopLevelRoute.ApproveSignTx}/${msgId}/${encodeURIComponent(origin)}/${account.type}/${signer}`
     );
   }
 
   async approveSignArbitrary(
     signer: string,
-    data: string
+    data: string,
+    origin: string
   ): Promise<SignArbitraryResponse> {
     if (await this.isLocked()) {
       throw new Error(ApprovalErrors.KeychainLocked());
@@ -104,7 +107,7 @@ export class ApprovalsService {
     await this.dataStore.set(msgId, data);
 
     return this.launchApprovalPopup(
-      `${TopLevelRoute.ApproveSignArbitrary}/${signer}`,
+      `${TopLevelRoute.ApproveSignArbitrary}/${encodeURIComponent(origin)}/${signer}`,
       { msgId }
     );
   }
@@ -212,21 +215,22 @@ export class ApprovalsService {
 
     const { tx: sdkTx } = this.sdkService.getSdk();
 
-    const txsWithSignatures = signatures.map((signature, i) => {
-      const tx = pendingTx.txs[i];
-      const signingData = tx.signingData.map((signingData) =>
-        new Message().encode(new SigningDataMsgValue(signingData))
-      );
-      const txBytes = sdkTx.appendMaspSignature(
-        tx.bytes,
-        signingData,
-        fromBase64(signature)
-      );
+    const tx = pendingTx.txs[0];
+    const signingData = tx.signingData.map((signingData) =>
+      new Message().encode(new SigningDataMsgValue(signingData))
+    );
+    const bytes = sdkTx.appendMaspSignatures(
+      tx.bytes,
+      signingData,
+      signatures.map(fromBase64)
+    );
 
-      return { ...tx, bytes: txBytes };
-    });
+    const txWithSignatures = {
+      ...tx,
+      bytes,
+    };
 
-    await this.txStore.set(msgId, { ...pendingTx, txs: txsWithSignatures });
+    await this.txStore.set(msgId, { ...pendingTx, txs: [txWithSignatures] });
   }
 
   async submitSignArbitrary(
@@ -404,11 +408,15 @@ export class ApprovalsService {
   }
 
   async approveUpdateDefaultAccount(address: string): Promise<void> {
-    const account = await this.keyRingService.queryAccountDetails(address);
+    const accounts = await this.keyRingService.queryAccountDetails(address);
+    if (!accounts) {
+      throw new Error(ApprovalErrors.AccountNotFound(address));
+    }
+    const [transactionAccount] = accounts;
 
     return this.launchApprovalPopup(TopLevelRoute.ApproveUpdateDefaultAccount, {
       address,
-      alias: account?.alias ?? "",
+      alias: transactionAccount.alias,
     });
   }
 
@@ -439,7 +447,9 @@ export class ApprovalsService {
     );
   }
 
-  async queryPendingTxBytes(msgId: string): Promise<string[] | undefined> {
+  async queryPendingTxBytes(
+    msgId: string
+  ): Promise<{ tx: string; shieldedHash?: string }[] | undefined> {
     const pendingTx = await this.txStore.get(msgId);
 
     if (!pendingTx) {
@@ -447,7 +457,13 @@ export class ApprovalsService {
     }
 
     if (pendingTx.txs) {
-      return pendingTx.txs.map(({ bytes }) => toBase64(bytes));
+      return pendingTx.txs.map((tx) => ({
+        tx: toBase64(tx.bytes),
+        shieldedHash:
+          tx.signingData[0].shieldedHash ?
+            toBase64(tx.signingData[0].shieldedHash)
+          : undefined,
+      }));
     }
   }
 

@@ -1,13 +1,10 @@
-import { Asset, Chain } from "@chain-registry/types";
+import { Chain } from "@chain-registry/types";
+import { FeeToken } from "@chain-registry/types/chain.schema";
 import { Bech32Config, ChainInfo, Currency } from "@keplr-wallet/types";
 import tokenImage from "App/Common/assets/token.svg";
-import {
-  getKnownChains,
-  getRestApiAddressByIndex,
-  getRpcByIndex,
-} from "atoms/integrations";
+import { getRestApiAddressByIndex, getRpcByIndex } from "atoms/integrations";
 import BigNumber from "bignumber.js";
-import { ChainId, ChainRegistryEntry, GasConfig } from "types";
+import { Asset, ChainId, ChainRegistryEntry, GasConfig } from "types";
 
 type GasPriceStep = {
   low: number;
@@ -31,48 +28,46 @@ export const findRegistryByChainId = (
   return undefined;
 };
 
-export const findAssetByDenom = (denom: string): Asset | undefined => {
-  const chainRegistry = getKnownChains();
-  if (!chainRegistry) return undefined;
+const getSvgOrPng = (image?: {
+  svg?: string;
+  png?: string;
+}): string | undefined => {
+  return image?.svg || image?.png;
+};
 
-  for (const registry of chainRegistry) {
-    const asset = registry.assets.assets.find((asset) => asset.base === denom);
-    if (asset) return asset;
-  }
-
-  return undefined;
+export const getChainImageUrl = (chain?: Chain): string => {
+  if (!chain) return tokenImage;
+  return (
+    getSvgOrPng(chain.images?.find((i) => i.theme?.circle)) ||
+    getSvgOrPng(chain.images?.[0]) ||
+    getSvgOrPng(chain.logo_URIs) ||
+    tokenImage
+  );
 };
 
 export const getAssetImageUrl = (asset?: Asset): string => {
   if (!asset) return tokenImage;
-  return asset.logo_URIs?.svg || asset.logo_URIs?.png || tokenImage;
+  return getSvgOrPng(asset.logo_URIs) || tokenImage;
 };
 
 export const getIbcGasConfig = (
-  registry: ChainRegistryEntry,
+  feeToken: FeeToken,
   gasLimit: number = 222_000
 ): GasConfig | undefined => {
-  // TODO: some chains support multiple fee tokens - what should we do?
-  const feeToken = registry.chain.fees?.fee_tokens?.[0];
-  const feeAsset = feeToken && findAssetByDenom(feeToken.denom);
+  const gasPriceInBaseDenom =
+    feeToken.average_gas_price ??
+    feeToken.low_gas_price ??
+    feeToken.fixed_min_gas_price ??
+    feeToken.high_gas_price ??
+    feeToken.gas_costs?.ibc_transfer ??
+    feeToken.gas_costs?.cosmos_send ??
+    0;
 
-  if (typeof feeToken !== "undefined" && feeAsset) {
-    const gasPriceInBaseDenom =
-      feeToken.average_gas_price ??
-      feeToken.low_gas_price ??
-      feeToken.fixed_min_gas_price ??
-      feeToken.high_gas_price ??
-      feeToken.gas_costs?.ibc_transfer ??
-      feeToken.gas_costs?.cosmos_send ??
-      0;
-
-    return {
-      gasPriceInMinDenom: BigNumber(gasPriceInBaseDenom),
-      gasLimit: BigNumber(gasLimit),
-      gasToken: feeToken.denom,
-    };
-  }
-  return undefined;
+  return {
+    gasPriceInMinDenom: BigNumber(gasPriceInBaseDenom),
+    gasLimit: BigNumber(gasLimit),
+    gasToken: feeToken.denom,
+  };
 };
 
 export const assetsToKeplrCurrencies = (assets: Asset[]): Currency[] => {
@@ -161,8 +156,10 @@ export const basicConvertToKeplrChain = (
     chainName: chain.chain_name,
     rpc: rpc.address,
     rest,
-    bip44: { coinType: chain.slip44 },
-    bech32Config: generateBech32Config(chain.bech32_prefix),
+    // TODO:
+    bip44: { coinType: chain.slip44! },
+    // TODO:
+    bech32Config: generateBech32Config(chain.bech32_prefix!),
     currencies,
     stakeCurrency,
     feeCurrencies: feeCurrencies.length ? feeCurrencies : defaultFeeCurrencies,

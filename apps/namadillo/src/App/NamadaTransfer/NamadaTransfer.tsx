@@ -1,4 +1,3 @@
-import { Chain } from "@chain-registry/types";
 import { Panel } from "@namada/components";
 import { AccountType } from "@namada/types";
 import { params } from "App/routes";
@@ -13,20 +12,21 @@ import {
   namadaTransparentAssetsAtom,
 } from "atoms/balance/atoms";
 import { chainParametersAtom } from "atoms/chain/atoms";
+import { namadaChainRegistryAtom } from "atoms/integrations";
 import { ledgerStatusDataAtom } from "atoms/ledger";
 import { rpcUrlAtom } from "atoms/settings";
 import BigNumber from "bignumber.js";
+import { useFathomTracker } from "hooks/useFathomTracker";
+import { useRequiresNewShieldedSync } from "hooks/useRequiresNewShieldedSync";
 import { useTransactionActions } from "hooks/useTransactionActions";
 import { useTransfer } from "hooks/useTransfer";
+import { useUrlState } from "hooks/useUrlState";
 import { wallets } from "integrations";
 import invariant from "invariant";
 import { useAtom, useAtomValue } from "jotai";
 import { createTransferDataFromNamada } from "lib/transactions";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import namadaChain from "registry/namada.json";
-import { twMerge } from "tailwind-merge";
-import { Address } from "types";
 import { NamadaTransferTopHeader } from "./NamadaTransferTopHeader";
 
 export const NamadaTransfer: React.FC = () => {
@@ -36,15 +36,25 @@ export const NamadaTransfer: React.FC = () => {
   const [generalErrorMessage, setGeneralErrorMessage] = useState("");
   const [currentStatus, setCurrentStatus] = useState("");
   const [currentStatusExplanation, setCurrentStatusExplanation] = useState("");
-  const [completedAt, setCompletedAt] = useState<Date | undefined>();
 
   const shieldedParam = searchParams.get(params.shielded);
-  const shielded = shieldedParam ? shieldedParam === "1" : true;
+  const requiresNewShieldedSync = useRequiresNewShieldedSync();
+
+  const shielded = useMemo(() => {
+    if (requiresNewShieldedSync) {
+      return false;
+    }
+    return shieldedParam ? shieldedParam === "1" : true;
+  }, [shieldedParam, requiresNewShieldedSync]);
 
   const rpcUrl = useAtomValue(rpcUrlAtom);
   const chainParameters = useAtomValue(chainParametersAtom);
   const defaultAccounts = useAtomValue(allDefaultAccountsAtom);
   const [ledgerStatus, setLedgerStatusStop] = useAtom(ledgerStatusDataAtom);
+  const { trackEvent } = useFathomTracker();
+
+  const namadaChainRegistry = useAtomValue(namadaChainRegistryAtom);
+  const chain = namadaChainRegistry.data?.chain;
 
   const { data: availableAssets, isLoading: isLoadingAssets } = useAtomValue(
     shielded ? namadaShieldedAssetsAtom : namadaTransparentAssetsAtom
@@ -64,7 +74,9 @@ export const NamadaTransfer: React.FC = () => {
     : account.type !== AccountType.ShieldedKeys
   );
   const sourceAddress = account?.address;
-  const selectedAssetAddress = searchParams.get(params.asset) || undefined;
+  const [selectedAssetAddress, setSelectedAssetAddress] = useUrlState(
+    params.asset
+  );
   const selectedAsset =
     selectedAssetAddress ? availableAssets?.[selectedAssetAddress] : undefined;
   const source = sourceAddress ?? "";
@@ -76,30 +88,34 @@ export const NamadaTransfer: React.FC = () => {
     isSuccess: isTransferSuccessful,
     txKind,
     feeProps,
+    completedAt,
+    redirectToTransactionPage,
   } = useTransfer({
     source,
     target,
-    token: selectedAsset?.originalAddress ?? "",
+    token: selectedAsset?.asset.address ?? "",
     displayAmount: displayAmount ?? new BigNumber(0),
     onBeforeBuildTx: () => {
-      setCurrentStatus("Generating MASP Parameters...");
-      setCurrentStatusExplanation(
-        "Generating MASP parameters can take a few seconds. Please wait..."
-      );
+      if (isSourceShielded) {
+        setCurrentStatus("Generating MASP Parameters...");
+        setCurrentStatusExplanation(
+          "Generating MASP parameters can take a few seconds. Please wait..."
+        );
+      } else {
+        setCurrentStatus("Preparing transaction...");
+      }
     },
     onBeforeSign: () => {
       setCurrentStatus("Waiting for signature...");
       setCurrentStatusExplanation("");
     },
-    onBeforeBroadcast: () => {
+    onBeforeBroadcast: async () => {
       setCurrentStatus("Broadcasting transaction to Namada...");
     },
-    onError: () => {
+    onError: async (originalError) => {
       setCurrentStatus("");
       setCurrentStatusExplanation("");
-    },
-    onBroadcasted: () => {
-      setCompletedAt(new Date());
+      setGeneralErrorMessage((originalError as Error).message);
     },
     asset: selectedAsset?.asset,
   });
@@ -112,21 +128,6 @@ export const NamadaTransfer: React.FC = () => {
       (currentParams) => {
         const newParams = new URLSearchParams(currentParams);
         newParams.set(params.shielded, isShielded ? "1" : "0");
-        return newParams;
-      },
-      { replace: true }
-    );
-  };
-
-  const onChangeSelectedAsset = (address?: Address): void => {
-    setSearchParams(
-      (currentParams) => {
-        const newParams = new URLSearchParams(currentParams);
-        if (address) {
-          newParams.set(params.asset, address);
-        } else {
-          newParams.delete(params.asset);
-        }
         return newParams;
       },
       { replace: true }
@@ -162,13 +163,23 @@ export const NamadaTransfer: React.FC = () => {
           throw "Couldn't create TransferData object";
         }
 
-        const tx = txList[0];
+        // We have to use the last element from list in case we revealPK
+        const tx = txList.pop()!;
         storeTransaction(tx);
+        trackEvent(
+          `${shielded ? "Shielded" : "Transparent"} Transfer: complete`
+        );
       } else {
         throw "Invalid transaction response";
       }
     } catch (err) {
-      setGeneralErrorMessage(err + "");
+      // We only set the general error message if it is not already set by onError
+      if (generalErrorMessage === "") {
+        setGeneralErrorMessage(
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+      trackEvent(`${shielded ? "Shielded" : "Transparent"} Transfer: error`);
     }
   };
 
@@ -176,13 +187,8 @@ export const NamadaTransfer: React.FC = () => {
   setLedgerStatusStop(isPerformingTransfer);
 
   return (
-    <Panel className="relative min-h-[600px]">
-      <header className="flex flex-col items-center text-center mb-3 gap-6">
-        <h1
-          className={twMerge("mt-6 text-lg", isSourceShielded && "text-yellow")}
-        >
-          Transfer
-        </h1>
+    <Panel className="min-h-[600px] rounded-sm flex flex-col flex-1 py-9">
+      <header className="flex flex-col items-center text-center mb-8 gap-6">
         <NamadaTransferTopHeader
           isSourceShielded={isSourceShielded}
           isDestinationShielded={target ? isTargetShielded : undefined}
@@ -193,36 +199,39 @@ export const NamadaTransfer: React.FC = () => {
           isLoadingAssets,
           availableAssets,
           availableAmount: selectedAsset?.amount,
-          chain: namadaChain as Chain,
+          chain,
           availableWallets: [wallets.namada],
           wallet: wallets.namada,
           walletAddress: sourceAddress,
           selectedAssetAddress,
-          onChangeSelectedAsset,
-          isShielded: shielded,
+          onChangeSelectedAsset: setSelectedAssetAddress,
+          isShieldedAddress: shielded,
           onChangeShielded,
           amount: displayAmount,
           onChangeAmount: setDisplayAmount,
           ledgerAccountInfo,
         }}
         destination={{
-          chain: namadaChain as Chain,
+          chain,
           enableCustomAddress: true,
           customAddress,
           onChangeCustomAddress: setCustomAddress,
           wallet: wallets.namada,
           walletAddress: customAddress,
-          isShielded: isShieldedAddress(customAddress),
+          isShieldedAddress: isShieldedAddress(customAddress),
         }}
         feeProps={feeProps}
         currentStatus={currentStatus}
-        completedAt={completedAt}
         currentStatusExplanation={currentStatusExplanation}
+        isShieldedTx={isSourceShielded}
+        isSyncingMasp={requiresNewShieldedSync}
         isSubmitting={
           isPerformingTransfer || isTransferSuccessful || Boolean(completedAt)
         }
         errorMessage={generalErrorMessage}
         onSubmitTransfer={onSubmitTransfer}
+        completedAt={completedAt}
+        onComplete={redirectToTransactionPage}
       />
     </Panel>
   );

@@ -1,7 +1,7 @@
 import { accountBalanceAtom, defaultAccountAtom } from "atoms/accounts";
 import { shieldedBalanceAtom } from "atoms/balance/atoms";
 import { shouldUpdateBalanceAtom, shouldUpdateProposalAtom } from "atoms/etc";
-import { claimableRewardsAtom, clearClaimRewards } from "atoms/staking";
+import { claimableRewardsAtom } from "atoms/staking";
 import { useAtomValue, useSetAtom } from "jotai";
 import { TransferStep, TransferTransactionData } from "types";
 import { useTransactionEventListener } from "utils";
@@ -26,7 +26,7 @@ export const useTransactionCallback = (): void => {
     setTimeout(() => shouldUpdateBalance(false), timePolling);
 
     if (account?.address) {
-      clearClaimRewards(account.address);
+      refetchRewards();
       setTimeout(() => refetchRewards(), timePolling);
     }
   };
@@ -52,6 +52,7 @@ export const useTransactionCallback = (): void => {
       status: "success",
       currentStep: TransferStep.Complete,
     });
+    shouldUpdateBalance(true);
     refetchBalances();
     refetchShieldedBalance();
   };
@@ -71,6 +72,7 @@ export const useTransactionCallback = (): void => {
   useTransactionEventListener("UnshieldingTransfer.Success", onTransferSuccess);
   useTransactionEventListener("IbcTransfer.Success", onTransferSuccess);
   useTransactionEventListener("IbcWithdraw.Success", onTransferSuccess);
+  useTransactionEventListener("ShieldedIbcWithdraw.Success", onTransferSuccess);
 
   useTransactionEventListener("TransparentTransfer.Error", onTransferError);
   useTransactionEventListener("ShieldedTransfer.Error", onTransferError);
@@ -78,4 +80,5 @@ export const useTransactionCallback = (): void => {
   useTransactionEventListener("UnshieldingTransfer.Error", onTransferError);
   useTransactionEventListener("IbcTransfer.Error", onTransferError);
   useTransactionEventListener("IbcWithdraw.Error", onTransferError);
+  useTransactionEventListener("ShieldedIbcWithdraw.Error", onTransferError);
 };

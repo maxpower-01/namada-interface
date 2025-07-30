@@ -1,4 +1,3 @@
-import { Asset } from "@chain-registry/types";
 import { coin } from "@cosmjs/proto-signing";
 import {
   Attribute,
@@ -13,6 +12,7 @@ import {
   UnshieldingTransferMsgValue,
 } from "@namada/types";
 import BigNumber from "bignumber.js";
+import { Asset } from "types";
 
 import {
   allTransferStages,
@@ -104,15 +104,41 @@ export const createIbcTransferMessage = (
   };
 };
 
+const getIbcTransferAttributes = (
+  tx: DeliverTxResponse
+): Record<string, string> => {
+  const transferAttributes = getEventAttribute(tx, "ibc_transfer");
+  if ("amount" in transferAttributes) {
+    return transferAttributes;
+  }
+
+  // Fallback to send_packet event if ibc_transfer doesn't contain amount
+  const sendPackageAttributes = getEventAttribute(tx, "send_packet");
+  if ("packet_data" in sendPackageAttributes) {
+    const packetData = JSON.parse(sendPackageAttributes.packet_data);
+    return {
+      ...transferAttributes,
+      amount: packetData.amount || "",
+      receiver: packetData.receiver || "",
+      sender: packetData.sender || "",
+    };
+  }
+
+  throw new Error(
+    "Unable to find the correct amount value in the IBC transaction"
+  );
+};
+
 export const createTransferDataFromIbc = (
   tx: DeliverTxResponse,
   rpc: string,
   asset: Asset,
   sourceChainId: string,
+  destinationChainId: string,
   details: IbcTransferStage,
   isShieldedTx: boolean
 ): TransferTransactionData => {
-  const transferAttributes = getEventAttribute(tx, "ibc_transfer");
+  const transferAttributes = getIbcTransferAttributes(tx);
   const packetAttributes = getEventAttribute(tx, "send_packet");
   const feeAttributes = getEventAttribute(tx, "fee_pay");
   const tipAttributes = getEventAttribute(tx, "tip_pay");
@@ -136,6 +162,8 @@ export const createTransferDataFromIbc = (
   const transferTx: IbcTransferTransactionData = {
     ...details,
     hash: tx.transactionHash,
+    // For IBC transfers(deposits), the innerHash is the same as the transaction hash
+    innerHash: tx.transactionHash,
     rpc,
     asset,
     feePaid,
@@ -146,7 +174,7 @@ export const createTransferDataFromIbc = (
     chainId: sourceChainId,
     shielded: isShieldedTx,
     currentStep: TransferStep.WaitingConfirmation,
-    destinationChainId: namada.chainId, //TODO: integrate with registry,
+    destinationChainId: destinationChainId ?? namada.chainId,
     sourceAddress: getAttributeValue(transferAttributes, "sender"),
     destinationAddress: getAttributeValue(transferAttributes, "receiver"),
     sequence: getNumberAttributeValue(packetAttributes, "packet_sequence"),

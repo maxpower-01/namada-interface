@@ -1,3 +1,5 @@
+import { getSdk } from "@namada/sdk/web";
+import sdkInit from "@namada/sdk/web-init";
 import clsx from "clsx";
 import { ReactNode, useCallback, useEffect, useState } from "react";
 
@@ -14,7 +16,7 @@ import { fromBase64, toBase64 } from "@cosmjs/encoding";
 import { chains } from "@namada/chains";
 import { TransferProps } from "@namada/types";
 import { PageHeader } from "App/Common";
-import { ApprovalDetails, Status } from "Approvals/Approvals";
+import { ApprovalDetails } from "Approvals/Approvals";
 import {
   QueryPendingTxBytesMsg,
   ReplaceMaspSignaturesMsg,
@@ -28,6 +30,7 @@ import { closeCurrentTab, parseTransferType } from "utils";
 import { ApproveIcon } from "./ApproveIcon";
 import { LedgerIcon } from "./LedgerIcon";
 import { StatusBox } from "./StatusBox";
+import { Status } from "./types";
 
 type Props = {
   details: ApprovalDetails;
@@ -83,8 +86,9 @@ export const ConfirmSignLedgerTx: React.FC<Props> = ({ details }) => {
   const signMaspTx = async (
     ledger: Ledger,
     bytes: Uint8Array,
-    path: string
-  ): Promise<{ sbar: Uint8Array; rbar: Uint8Array }> => {
+    path: string,
+    shieldedHash?: string
+  ): Promise<{ sbar: Uint8Array; rbar: Uint8Array }[]> => {
     const signMaspSpendsResponse = await ledger.namadaApp.signMaspSpends(
       path,
       Buffer.from(bytes)
@@ -96,14 +100,36 @@ export const ConfirmSignLedgerTx: React.FC<Props> = ({ details }) => {
       );
     }
 
-    const spendSignatureResponse = await ledger.namadaApp.getSpendSignature();
-    if (spendSignatureResponse.returnCode !== LedgerError.NoErrors) {
-      throw new Error(
-        `Getting spends signature error encountered: ${signMaspSpendsResponse.errorMessage}`
-      );
+    if (!shieldedHash) {
+      throw new Error("Shielded hash is required for MASP transactions");
     }
 
-    return spendSignatureResponse;
+    const { cryptoMemory } = await sdkInit();
+    // TODO: Find a better way to init the sdk, token has to be any valid token
+    const sdk = getSdk(
+      cryptoMemory,
+      "",
+      "",
+      "",
+      "tnam1q9gr66cvu4hrzm0sd5kmlnjje82gs3xlfg3v6nu7"
+    );
+    const descriptors = await sdk
+      .getMasp()
+      .getDescriptorMap(bytes, fromBase64(shieldedHash));
+
+    const responses = [];
+    // TODO: this probably means that we do not really need descriptor map, but just to iterate over the sapling inputs
+    for (const _ of descriptors) {
+      const spendSignatureResponse = await ledger.namadaApp.getSpendSignature();
+      if (spendSignatureResponse.returnCode !== LedgerError.NoErrors) {
+        throw new Error(
+          `Getting spends signature error encountered: ${signMaspSpendsResponse.errorMessage}`
+        );
+      }
+      responses.push(spendSignatureResponse);
+    }
+
+    return responses;
   };
 
   const signLedgerTx = async (
@@ -129,15 +155,20 @@ export const ConfirmSignLedgerTx: React.FC<Props> = ({ details }) => {
       ledger: Ledger,
       tx: string,
       zip32Path: string,
-      signatures: string[]
+      signatures: string[],
+      shieldedHash?: string
     ) => {
-      const { sbar, rbar } = await signMaspTx(
+      const responses = await signMaspTx(
         ledger,
         fromBase64(tx),
-        zip32Path
+        zip32Path,
+        shieldedHash
       );
-      const signature = toBase64(new Uint8Array([...rbar, ...sbar]));
-      signatures.push(signature);
+
+      responses.forEach(({ sbar, rbar }) => {
+        const signature = toBase64(new Uint8Array([...rbar, ...sbar]));
+        signatures.push(signature);
+      });
     },
     []
   );
@@ -196,10 +227,12 @@ export const ConfirmSignLedgerTx: React.FC<Props> = ({ details }) => {
         if (!accountDetails) {
           throw new Error(`Failed to query account details for ${signer}`);
         }
+        const [transparentAccount, shieldedAccount] = accountDetails;
+
         const path = {
-          account: accountDetails.path.account,
-          change: accountDetails.path.change || 0,
-          index: accountDetails.path.index || 0,
+          account: transparentAccount.path.account,
+          change: transparentAccount.path.change || 0,
+          index: transparentAccount.path.index || 0,
         };
 
         const pendingTxs = await requester.sendMessage(
@@ -227,19 +260,26 @@ export const ConfirmSignLedgerTx: React.FC<Props> = ({ details }) => {
 
         const transferTypes = txDetails.flatMap((details) =>
           details.commitments
-            .filter((cmt) => cmt.txType === TxType.Transfer)
-            .map(
-              (cmt) =>
+            .filter((cmt) =>
+              [TxType.Transfer, TxType.IBCTransfer].includes(
+                cmt.txType as TxType
+              )
+            )
+            .map((cmt) =>
+              cmt.txType === TxType.Transfer ?
                 parseTransferType(cmt as TransferProps, details.wrapperFeePayer)
                   .type
+              : cmt.maspTxIn && cmt.maspTxOut ? "IbcUnshieldTransfer"
+              : "IbcTransfer"
             )
         );
         // For now we work under the assumption that we can't batch transfers from masp with other tx types
         const fromMasp =
           transferTypes.includes("Shielded") ||
-          transferTypes.includes("Unshielding");
+          transferTypes.includes("Unshielding") ||
+          transferTypes.includes("IbcUnshieldTransfer");
 
-        for await (const tx of pendingTxs) {
+        for await (const { tx, shieldedHash } of pendingTxs) {
           if (txCount > 1) {
             setStepTwoDescription(
               <p>
@@ -251,11 +291,22 @@ export const ConfirmSignLedgerTx: React.FC<Props> = ({ details }) => {
           }
 
           if (fromMasp) {
+            if (!shieldedAccount) {
+              throw new Error(
+                `Shielded account details for ${signer} not found!`
+              );
+            }
             const zip32Path = makeSaplingPath(chains.namada.bip44.coinType, {
-              account: path.account,
+              account: shieldedAccount.path.account,
             });
             // Adds new signature to the collection
-            await handleMaspSignTx(ledger, tx, zip32Path, maspSignatures);
+            await handleMaspSignTx(
+              ledger,
+              tx,
+              zip32Path,
+              maspSignatures,
+              shieldedHash
+            );
           } else {
             const bip44Path = makeBip44Path(chains.namada.bip44.coinType, path);
             // Adds new signature to the collection

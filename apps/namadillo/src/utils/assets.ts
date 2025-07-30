@@ -1,9 +1,9 @@
-import { Asset } from "@chain-registry/types";
 import { IbcToken, NativeToken } from "@namada/indexer-client";
 import { shortenAddress } from "@namada/utils";
-import { AddressWithAssetAndAmountMap } from "types";
+import { Address, Asset, AssetWithAmount } from "types";
 
 export const unknownAsset = (denom: string): Asset => ({
+  type_asset: "unknown",
   denom_units: [{ denom, exponent: 0 }],
   base: denom,
   name: denom,
@@ -17,6 +17,13 @@ export const findAssetByToken = (
   token: NativeToken | IbcToken,
   assets: Asset[]
 ): Asset | undefined => {
+  // first, search by the address
+  const asset = assets.find((a) => a.address === token.address);
+  if (asset) {
+    return asset;
+  }
+
+  // then, search by trace
   if ("trace" in token) {
     const traceDenom = token.trace.split("/").at(-1);
     if (traceDenom) {
@@ -36,17 +43,14 @@ export const findAssetByToken = (
   return undefined;
 };
 
-export const filterAvailableAsssetsWithBalance = (
-  availableAssets?: AddressWithAssetAndAmountMap
-): AddressWithAssetAndAmountMap => {
+export const filterAvailableAssetsWithBalance = (
+  availableAssets?: Record<Address, AssetWithAmount>
+): Record<Address, AssetWithAmount> => {
   if (!availableAssets) return {};
-  return Object.keys(availableAssets).reduce(
-    (previous, current): AddressWithAssetAndAmountMap => {
-      if (availableAssets![current].amount.gt(0)) {
-        return { ...previous, [current]: availableAssets![current] };
-      }
-      return previous;
-    },
-    {}
-  );
+  return Object.keys(availableAssets).reduce((previous, current) => {
+    if (availableAssets![current].amount.gt(0)) {
+      return { ...previous, [current]: availableAssets![current] };
+    }
+    return previous;
+  }, {});
 };

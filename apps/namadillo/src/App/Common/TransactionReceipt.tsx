@@ -10,19 +10,14 @@ import { SelectedChain } from "App/Transfer/SelectedChain";
 import { SelectedWallet } from "App/Transfer/SelectedWallet";
 import { TokenAmountCard } from "App/Transfer/TokenAmountCard";
 import { TransferArrow } from "App/Transfer/TransferArrow";
-import { findChainById } from "atoms/integrations";
+import { getChainRegistryByChainId } from "atoms/integrations";
 import BigNumber from "bignumber.js";
 import clsx from "clsx";
 import { wallets } from "integrations";
 import { useMemo } from "react";
 import { FaCheckCircle } from "react-icons/fa";
 import { GoHourglass, GoXCircle } from "react-icons/go";
-import {
-  allTransferTypes,
-  ibcTransferTypes,
-  PartialTransferTransactionData,
-  TransferStep,
-} from "types";
+import { PartialTransferTransactionData, TransferStep } from "types";
 
 type TransactionReceiptProps = {
   transaction: PartialTransferTransactionData;
@@ -46,12 +41,9 @@ const TransferTransactionReceipt = ({
   transaction,
 }: TransactionReceiptProps): JSX.Element => {
   const getChain = (chainId: string, address: string): Chain | undefined => {
-    const chain = findChainById(chainId);
+    const chain = getChainRegistryByChainId(chainId)?.chain;
     if (isNamadaAddress(address) && chain) {
-      return parseChainInfo(
-        chain,
-        isShieldedAddress(transaction.destinationAddress || "")
-      );
+      return parseChainInfo(chain, isShieldedAddress(address || ""));
     }
     return chain;
   };
@@ -61,15 +53,12 @@ const TransferTransactionReceipt = ({
   }, [transaction]);
 
   const destinationChain = useMemo(() => {
-    const isIbc = ibcTransferTypes.includes(transaction.type);
-    if (!isIbc) return sourceChain;
-
-    if ("destinationChainId" in transaction && transaction.destinationChainId) {
-      return getChain(
-        transaction.destinationChainId,
-        transaction.destinationAddress || ""
-      );
-    }
+    return getChain(
+      "destinationChainId" in transaction ?
+        transaction.destinationChainId || ""
+      : transaction.chainId,
+      transaction.destinationAddress || ""
+    );
   }, [transaction]);
 
   const sourceWallet =
@@ -84,8 +73,8 @@ const TransferTransactionReceipt = ({
 
   return (
     <Stack className="max-w-[440px] mx-auto">
-      <div className="rounded-md bg-neutral-800 px-4 pt-5 pb-6">
-        <header className="relative flex justify-between">
+      <div className="rounded-md bg-neutral-800 px-4 pb-6">
+        <header className="relative flex justify-between pt-4">
           {sourceChain && (
             <SelectedChain
               chain={sourceChain}
@@ -96,6 +85,7 @@ const TransferTransactionReceipt = ({
             <SelectedWallet
               wallet={sourceWallet}
               address={transaction.sourceAddress}
+              displayTooltip={!transaction.sourceAddress?.includes("shielded")}
             />
           )}
         </header>
@@ -144,10 +134,6 @@ const TransferTransactionReceipt = ({
 export const TransactionReceipt = ({
   transaction,
 }: TransactionReceiptProps): JSX.Element => {
-  const isTransferTransaction = (): boolean => {
-    return allTransferTypes.includes(transaction.type);
-  };
-
   return (
     <div>
       <header className="mb-8">
@@ -188,9 +174,7 @@ export const TransactionReceipt = ({
         )}
       </header>
       <article>
-        {isTransferTransaction() ?
-          <TransferTransactionReceipt transaction={transaction} />
-        : <div></div>}
+        <TransferTransactionReceipt transaction={transaction} />
       </article>
     </div>
   );

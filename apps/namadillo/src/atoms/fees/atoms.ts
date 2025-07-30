@@ -1,9 +1,10 @@
 import { GasEstimate } from "@namada/indexer-client";
 import { defaultAccountAtom } from "atoms/accounts";
 import { indexerApiAtom } from "atoms/api";
-import { chainAssetsMapAtom } from "atoms/chain";
+import { namadaRegistryChainAssetsMapAtom } from "atoms/integrations";
 import { queryDependentFn } from "atoms/utils";
 import BigNumber from "bignumber.js";
+import invariant from "invariant";
 import { atomWithQuery } from "jotai-tanstack-query";
 import { atomFamily } from "jotai/utils";
 import { isPublicKeyRevealed } from "lib/query";
@@ -16,6 +17,7 @@ import { fetchGasEstimate, fetchTokensGasPrice } from "./services";
 export type GasPriceTableItem = {
   token: Address;
   gasPrice: BigNumber;
+  gasPriceInMinDenom: BigNumber;
 };
 
 export type GasPriceTable = GasPriceTableItem[];
@@ -37,14 +39,14 @@ export const gasEstimateFamily = atomFamily(
           }
 
           const gasEstimate = await fetchGasEstimate(api, txKinds);
-
-          // TODO: we need to improve this estimate API. Currently, gasEstimate.min returns
-          // the minimum gas limit ever used for a TX, and avg is failing in most of the transactions.
-          const newMin = gasEstimate.max;
+          const precision = Math.max(
+            0,
+            Math.min(1, gasEstimate.totalEstimates / 1000)
+          );
           return {
-            min: newMin,
-            avg: Math.ceil(newMin * 1.25),
-            max: Math.ceil(newMin * 1.5),
+            min: Math.ceil(gasEstimate.min * 1.1 - precision * 0.1),
+            avg: Math.ceil(gasEstimate.avg * 1.25 - precision * 0.25),
+            max: Math.ceil(gasEstimate.max * 1.5 - precision * 0.5),
             totalEstimates: gasEstimate.totalEstimates,
           };
         },
@@ -55,24 +57,32 @@ export const gasEstimateFamily = atomFamily(
 
 export const gasPriceTableAtom = atomWithQuery<GasPriceTable>((get) => {
   const api = get(indexerApiAtom);
-  const chainAssetsMap = get(chainAssetsMapAtom);
+  const chainAssetsMap = get(namadaRegistryChainAssetsMapAtom);
 
   return {
-    queryKey: ["gas-price-table", chainAssetsMap],
+    queryKey: ["gas-price-table", chainAssetsMap.data],
     ...queryDependentFn(async () => {
+      invariant(chainAssetsMap.data, "No chain settings");
+
       const response = await fetchTokensGasPrice(api);
-      return response.map(({ token, minDenomAmount }) => {
-        const asset = chainAssetsMap[token];
-        const baseAmount = BigNumber(minDenomAmount);
-        return {
-          token,
-          gasPrice:
-            asset && isNamadaAsset(asset) ?
-              toDisplayAmount(asset, baseAmount)
-            : baseAmount,
-        };
-      });
-    }, []),
+      return (
+        response
+          // filter only tokens that exists on the chain
+          .filter(({ token }) => Boolean(chainAssetsMap.data[token]))
+          .map(({ token, minDenomAmount }) => {
+            const asset = chainAssetsMap.data[token];
+            const baseAmount = BigNumber(minDenomAmount);
+            return {
+              token,
+              gasPrice:
+                asset && isNamadaAsset(asset) ?
+                  toDisplayAmount(asset, baseAmount)
+                : baseAmount,
+              gasPriceInMinDenom: baseAmount,
+            };
+          })
+      );
+    }, [chainAssetsMap]),
   };
 });
 

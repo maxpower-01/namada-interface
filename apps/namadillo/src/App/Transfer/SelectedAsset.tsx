@@ -1,8 +1,8 @@
-import { Asset } from "@chain-registry/types";
 import { SkeletonLoading } from "@namada/components";
 import clsx from "clsx";
 import { getAssetImageUrl } from "integrations/utils";
 import { GoChevronDown } from "react-icons/go";
+import { Asset } from "types";
 import { EmptyResourceIcon } from "./EmptyResourceIcon";
 
 type SelectedAssetProps = {
@@ -53,10 +53,7 @@ export const SelectedAsset = ({
         </span>
       )}
       {asset && (
-        <span
-          className={selectorClassList}
-          style={{ backgroundColor: asset.logo_URIs?.theme }}
-        >
+        <span className={selectorClassList}>
           <img
             className={clsx(
               "w-15 aspect-square object-cover select-none",
